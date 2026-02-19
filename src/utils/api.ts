@@ -3,7 +3,7 @@
  * Handles all backend API communications
  */
 
-const API_URL = import.meta.env.CONST_API_URL;
+const API_URL = "https://a6c6-139-5-248-251.ngrok-free.app";
 
 interface ApiResponse<T = any> {
   success?: boolean;

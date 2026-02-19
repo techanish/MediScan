@@ -170,17 +170,17 @@ export function TransferOwnership({ medicines, getToken, onTransfer, userEmail }
   return (
     <div>
       <div className="mb-6">
-        <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-          <ArrowRightLeft className="w-6 h-6 text-blue-500" />
+        <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+          <ArrowRightLeft className="w-6 h-6 text-emerald-600 dark:text-emerald-500" />
           Transfer Ownership
         </h2>
-        <p className="text-gray-500 mt-1">Transfer medicine ownership to another party</p>
+        <p className="text-slate-500 dark:text-slate-400 mt-1">Transfer medicine ownership to another party</p>
       </div>
 
       {medicines.length === 0 ? (
-        <div className="text-center py-12 bg-gray-50 rounded-xl">
-          <Package className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-          <p className="text-gray-500">You don't own any medicines to transfer</p>
+        <div className="text-center py-12 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
+          <Package className="w-12 h-12 text-slate-300 dark:text-slate-600 mx-auto mb-3" />
+          <p className="text-slate-500 dark:text-slate-400">You don't own any medicines to transfer</p>
         </div>
       ) : (
         <form onSubmit={handleSubmit} className="max-w-xl space-y-5">
@@ -188,8 +188,8 @@ export function TransferOwnership({ medicines, getToken, onTransfer, userEmail }
             <div
               className={`flex items-center gap-2 p-4 rounded-xl ${
                 message.type === 'success'
-                  ? 'bg-green-50 border border-green-100 text-green-700'
-                  : 'bg-red-50 border border-red-100 text-red-700'
+                  ? 'bg-green-50 dark:bg-green-900/30 border border-green-100 dark:border-green-900/50 text-green-700 dark:text-green-300'
+                  : 'bg-red-50 dark:bg-red-900/30 border border-red-100 dark:border-red-900/50 text-red-700 dark:text-red-300'
               }`}
             >
               {message.type === 'success' ? (
@@ -202,9 +202,9 @@ export function TransferOwnership({ medicines, getToken, onTransfer, userEmail }
           )}
 
           <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700">Select Medicine</label>
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Select Medicine</label>
             <div className="relative">
-              <Package className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <Package className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
               <select
                 value={formData.batchID}
                 onChange={(e) => {
@@ -212,7 +212,7 @@ export function TransferOwnership({ medicines, getToken, onTransfer, userEmail }
                   setSelectedMedicine(selected || null);
                   setFormData({ ...formData, batchID: e.target.value, unitsToTransfer: '' });
                 }}
-                className="w-full pl-12 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all appearance-none"
+                className="w-full pl-12 pr-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all appearance-none text-slate-900 dark:text-white"
                 required
               >
                 <option value="">Select a medicine batch</option>
@@ -227,20 +227,20 @@ export function TransferOwnership({ medicines, getToken, onTransfer, userEmail }
               </select>
             </div>
             {selectedMedicine && (
-              <p className="text-xs text-gray-600">
+              <p className="text-xs text-slate-600 dark:text-slate-400">
                 Available: {getAvailableUnits(selectedMedicine, userEmail)} units
               </p>
             )}
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700">Transfer To Company</label>
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Transfer To Company</label>
             <div className="relative">
-              <Building2 className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <Building2 className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
               <select
                 value={formData.selectedCompany}
                 onChange={(e) => setFormData({ ...formData, selectedCompany: e.target.value })}
-                className="w-full pl-12 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all appearance-none"
+                className="w-full pl-12 pr-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all appearance-none text-slate-900 dark:text-white"
                 required
                 disabled={isLoadingCompanies}
               >
@@ -255,28 +255,28 @@ export function TransferOwnership({ medicines, getToken, onTransfer, userEmail }
               </select>
             </div>
             {companies.length === 0 && !isLoadingCompanies && (
-              <p className="text-xs text-amber-600">
+              <p className="text-xs text-amber-600 dark:text-amber-400">
                 No companies found. Ask other users to set their company name in their profile.
               </p>
             )}
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700">Number of Units to Transfer</label>
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Number of Units to Transfer</label>
             <div className="relative">
-              <Package className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <Package className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
               <input
                 type="number"
                 value={formData.unitsToTransfer}
                 onChange={(e) => setFormData({ ...formData, unitsToTransfer: parseInt(e.target.value) || 0 })}
                 max={selectedMedicine ? getAvailableUnits(selectedMedicine, userEmail) : undefined}
-                className="w-full pl-12 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                className="w-full pl-12 pr-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all text-slate-900 dark:text-white placeholder-slate-400"
                 required
                 disabled={!formData.batchID}
               />
             </div>
             {selectedMedicine && (
-              <p className="text-xs text-blue-600">
+              <p className="text-xs text-emerald-600 dark:text-emerald-400">
                 Max: {getAvailableUnits(selectedMedicine, userEmail)} units
               </p>
             )}
@@ -285,7 +285,7 @@ export function TransferOwnership({ medicines, getToken, onTransfer, userEmail }
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full py-3 bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-semibold rounded-xl shadow-lg shadow-blue-200 hover:shadow-xl hover:shadow-blue-300 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl shadow-lg shadow-emerald-200 dark:shadow-none hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {isLoading ? (
               <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />

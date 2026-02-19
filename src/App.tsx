@@ -21,9 +21,21 @@ export interface Medicine {
   remainingUnits?: number;
   currentOwner: string;
   currentOwnerRole?: string;
-  ownerHistory: { owner: string; role: string; date?: string; time?: string }[];
+  ownerHistory: { owner: string; role: string; date?: string; time?: string; action?: string; unitsPurchased?: number; from?: string; notes?: string }[];
   verified?: boolean;
   status?: string;
+  // New fields
+  category?: string;
+  description?: string;
+  dosage?: string;
+  composition?: string;
+  price?: number;
+  location?: string;
+  reorderPoint?: number;
+  blockReason?: string;
+  imageUrl?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export function App() {
@@ -240,10 +252,10 @@ export function App() {
   // Show loading state while Clerk is initializing
   if (!isLoaded) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 flex items-center justify-center">
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center">
         <div className="text-center">
-          <div className="w-16 h-16 border-4 border-emerald-200 border-t-emerald-600 rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-gray-600">Loading...</p>
+          <div className="w-16 h-16 border-4 border-slate-200 dark:border-slate-800 border-t-emerald-600 rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-slate-600 dark:text-slate-400">Loading...</p>
         </div>
       </div>
     );
@@ -252,37 +264,38 @@ export function App() {
   return (
     <>
       <SignedOut>
-        <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 flex items-center justify-center p-4">
+        <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-4">
           <div className="w-full max-w-md">
             <div className="text-center mb-8">
-              <h1 className="text-3xl font-bold text-gray-900 mb-2">MediScan</h1>
-              <p className="text-gray-600">Medicine Verification System</p>
-              <p className="text-sm text-gray-500 mt-2">
+              <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-2">MediScan</h1>
+              <p className="text-slate-600 dark:text-slate-400">Medicine Verification System</p>
+              <p className="text-sm text-slate-500 dark:text-slate-500 mt-2">
                 Sign in to access the platform
               </p>
             </div>
-            <div className="bg-white rounded-2xl shadow-xl p-6">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 p-6">
               <SignIn 
                 appearance={{
                   elements: {
                     rootBox: "w-full",
-                    card: "shadow-none"
+                    card: "shadow-none",
+                    main: "bg-transparent"
                   }
                 }}
               />
             </div>
-            <div className="mt-6 p-4 bg-blue-50 rounded-lg">
-              <p className="text-sm font-semibold text-blue-900 mb-2">📌 Important: Setting Up User Roles</p>
-              <p className="text-xs text-blue-800 mb-2">
+            <div className="mt-6 p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-900/30 rounded-lg">
+              <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-300 mb-2">📌 Important: Setting Up User Roles</p>
+              <p className="text-xs text-emerald-800 dark:text-emerald-400 mb-2">
                 After signing up, you need to set your role in Clerk Dashboard:
               </p>
-              <ol className="text-xs text-blue-800 space-y-1 ml-4 list-decimal">
+              <ol className="text-xs text-emerald-800 dark:text-emerald-400 space-y-1 ml-4 list-decimal">
                 <li>Go to Clerk Dashboard → Users</li>
                 <li>Click on your user</li>
                 <li>Go to "Metadata" tab</li>
-                <li>Add to Public Metadata: <code className="bg-blue-100 px-1 rounded">{"{ \"role\": \"MANUFACTURER\" }"}</code></li>
+                <li>Add to Public Metadata: <code className="bg-emerald-100 dark:bg-emerald-900/50 px-1 rounded">{"{ \"role\": \"MANUFACTURER\" }"}</code></li>
               </ol>
-              <p className="text-xs text-blue-700 mt-2">
+              <p className="text-xs text-emerald-700 dark:text-emerald-500 mt-2">
                 Available roles: MANUFACTURER, DISTRIBUTOR, PHARMACY, CUSTOMER, ADMIN
               </p>
             </div>

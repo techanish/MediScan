@@ -3,7 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Pharma Verification System</title>
+    <meta name="theme-color" content="#8B5CF6" />
+    <title>MediScan - Medicine Verification System</title>
+    <script>
+      // Prevent flash of unstyled content by setting theme immediately
+      (function() {
+        const savedTheme = localStorage.getItem('mediscan-theme');
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const theme = savedTheme || (prefersDark ? 'dark' : 'light');
+        
+        document.documentElement.classList.add(theme);
+        document.documentElement.setAttribute('data-theme', theme);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

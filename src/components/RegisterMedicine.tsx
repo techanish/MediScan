@@ -16,10 +16,18 @@ export function RegisterMedicine({ onRegister }: RegisterMedicineProps) {
     mfgDate: '',
     expDate: '',
     totalUnits: '',
+    category: 'General',
+    description: '',
+    dosage: '',
+    composition: '',
+    price: '',
+    location: '',
+    reorderPoint: '',
   });
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const validateForm = () => {
     const errors: Record<string, string> = {};
@@ -107,39 +115,29 @@ export function RegisterMedicine({ onRegister }: RegisterMedicineProps) {
       totalUnits: parseInt(trimmedData.totalUnits, 10),
     });
 
-    // dont what next ? show me the flow 
-    // then  i think this is the issue 
-    // th eissue was that all state changes in the react should be async becuase the response is async.
-    
-    //but it's showing locally for me, on other device using hosted network, same account it's not showing.
-// i don't understand this 
-// show me the database 
-// this is happening because you are using a local data store u need to have a online or central store
-//mongodb on other device
-
-
-
     if (result.success) {
       setMessage({ type: 'success', text: 'Medicine registered successfully!' });
       setFormData({ batchID: '', name: '', manufacturer: '', mfgDate: '', expDate: '', totalUnits: '' });
       setFieldErrors({});
     } else {
-      setMessage({ type: 'error', text: result.error || 'Registration failed error 116' });
+      setMessage({ type: 'error', text: result.error || 'Registration failed' });
     }
     setIsLoading(false);
   };
 
   return (
-    <div> 
-      <div className="mb-6">
-        <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-          <Pill className="w-6 h-6 text-emerald-500" />
+    <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 sm:p-8 max-w-4xl mx-auto"> 
+      <div className="mb-8 border-b border-slate-200 dark:border-slate-700 pb-6">
+        <h2 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-3">
+          <div className="w-10 h-10 bg-emerald-100 dark:bg-emerald-900/30 rounded-lg flex items-center justify-center">
+            <Pill className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+          </div>
           Register New Medicine
         </h2>
-        <p className="text-gray-500 mt-1">Add a new medicine to the verification system</p>
+        <p className="text-slate-500 dark:text-slate-400 mt-2 ml-13">Add a new medicine to the verification system</p>
       </div>
 
-      <form onSubmit={handleSubmit} className="max-w-xl space-y-5">
+      <form onSubmit={handleSubmit} className="space-y-6">
         {message && (
           <div
             className={`flex items-center gap-2 p-4 rounded-xl ${
@@ -305,7 +303,7 @@ export function RegisterMedicine({ onRegister }: RegisterMedicineProps) {
         <button
           type="submit"
           disabled={isLoading}
-          className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-semibold rounded-xl shadow-lg shadow-emerald-200 hover:shadow-xl hover:shadow-emerald-300 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-semibold rounded-xl shadow-lg shadow-emerald-200 dark:shadow-none hover:shadow-xl hover:shadow-emerald-300 dark:hover:shadow-emerald-900/20 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
           {isLoading ? (
             <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />

@@ -8,6 +8,7 @@ const { clerkClient } = require("@clerk/clerk-sdk-node");
 
 const Medicine = require("./models/Medicine");
 const ScanLog = require("./models/ScanLog");
+const Notification = require("./models/Notification");
 const { clerkAuth, authorizeRoles } = require("./middleware/clerkAuth");
 
 // Constants
@@ -386,7 +387,10 @@ app.post("/medicine/register",
   authorizeRoles("MANUFACTURER"),
   async (req, res) => {
     try {
-      const { batchID, name, manufacturer, mfgDate, expDate, totalUnits } = req.body;
+      const { 
+        batchID, name, manufacturer, mfgDate, expDate, totalUnits,
+        category, description, dosage, composition, price, location, reorderPoint
+      } = req.body;
 
       // Validate required fields
       if (!batchID || !name || !manufacturer || !mfgDate || !expDate || !totalUnits) {
@@ -418,6 +422,14 @@ app.post("/medicine/register",
         remainingUnits: units, // Initially, all units are remaining
         currentOwner: req.user.email,
         status: "ACTIVE",
+        // New fields with defaults
+        category: category || "General",
+        description: description || "",
+        dosage: dosage || "",
+        composition: composition || "",
+        price: price || 0,
+        location: location || "",
+        reorderPoint: reorderPoint || Math.floor(units * 0.2), // Default 20% of total
         ownerHistory: [
           { 
             owner: req.user.email, 
@@ -427,6 +439,16 @@ app.post("/medicine/register",
           }
         ]
       });
+
+      // Create notification for successful registration
+      await createNotification(
+        req.user.email,
+        'SYSTEM',
+        'Medicine Registered',
+        `Successfully registered ${name} (Batch: ${batchID}) with ${units} units`,
+        batchID,
+        'normal'
+      );
 
       res.status(201).json({ 
         success: true,
@@ -564,6 +586,25 @@ app.post("/medicine/transfer/:batchID",
 
       console.log(`✅ Transfer successful: ${units} units from ${req.user.email} → ${newOwnerEmail}`);
 
+      // Create notifications for both parties
+      await createNotification(
+        newOwnerEmail,
+        'TRANSFER_RECEIVED',
+        'Medicine Transfer Received',
+        `You received ${units} units of ${med.name} (Batch: ${batchID}) from ${req.user.email}`,
+        batchID,
+        'normal'
+      );
+
+      await createNotification(
+        req.user.email,
+        'SYSTEM',
+        'Transfer Completed',
+        `Successfully transferred ${units} units of ${med.name} (Batch: ${batchID}) to ${newOwnerEmail}`,
+        batchID,
+        'normal'
+      );
+
       res.json({ 
         success: true,
         message: `✅ ${units} units transferred successfully`, 
@@ -689,6 +730,27 @@ app.post("/medicine/purchase/:batchID",
 
       console.log(`✅ Purchase successful: ${unitsPurchased} units sold to ${customerEmail || 'CUSTOMER'}`);
 
+      // Create notifications
+      if (customerEmail && customerEmail !== DEFAULT_CUSTOMER_EMAIL) {
+        await createNotification(
+          customerEmail,
+          'SALE_COMPLETED',
+          'Medicine Purchased',
+          `You purchased ${unitsPurchased} units of ${med.name} (Batch: ${batchID})`,
+          batchID,
+          'normal'
+        );
+      }
+
+      await createNotification(
+        req.user.email,
+        'SALE_COMPLETED',
+        'Sale Completed',
+        `Sold ${unitsPurchased} units of ${med.name} (Batch: ${batchID})`,
+        batchID,
+        'normal'
+      );
+
       res.json({ 
         success: true,
         message: `✅ ${unitsPurchased} units sold`, 
@@ -707,12 +769,34 @@ app.post("/medicine/block/:batchID",
   async (req, res) => {
     try {
       const batchID = req.params.batchID;
+      const { reason } = req.body;
 
       const med = await Medicine.findOne({ batchID });
       if (!med) return res.status(404).json({ error: "Batch not found" });
 
       med.status = "BLOCKED";
+      med.blockReason = reason || "Blocked by admin";
+      
+      // Add to history
+      med.ownerHistory.push({
+        owner: req.user.email,
+        role: req.user.role,
+        action: "BLOCKED",
+        unitsPurchased: 0,
+        notes: reason || "Blocked by admin"
+      });
+
       await med.save();
+
+      // Notify current owner
+      await createNotification(
+        med.currentOwner,
+        'MEDICINE_BLOCKED',
+        'Medicine Blocked',
+        `${med.name} (Batch: ${batchID}) has been blocked. Reason: ${reason || 'Not specified'}`,
+        batchID,
+        'urgent'
+      );
 
       res.json({ 
         success: true,
@@ -824,6 +908,345 @@ app.get("/logs", clerkAuth, authorizeRoles("ADMIN"), async (req, res) => {
       success: true,
       count: logs.length,
       logs 
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ======================================
+   ✅ ANALYTICS & STATISTICS ROUTES
+====================================== */
+
+// ✅ Dashboard Statistics
+app.get("/analytics/dashboard", clerkAuth, async (req, res) => {
+  try {
+    const userEmail = req.user.email.toLowerCase();
+    const userRole = req.user.role;
+
+    let stats = {};
+
+    if (userRole === 'ADMIN') {
+      // Admin sees system-wide stats
+      const totalMedicines = await Medicine.countDocuments();
+      const activeBatches = await Medicine.countDocuments({ status: 'ACTIVE' });
+      const blockedBatches = await Medicine.countDocuments({ status: 'BLOCKED' });
+      const totalScans = await ScanLog.countDocuments();
+      const genuineScans = await ScanLog.countDocuments({ result: /GENUINE/ });
+      const fakeScans = await ScanLog.countDocuments({ result: /FAKE/ });
+
+      // Get recent activity
+      const recentScans = await ScanLog.find().sort({ time: -1 }).limit(10);
+      
+      // Medicines expiring soon (next 90 days)
+      const ninetyDaysFromNow = new Date();
+      ninetyDaysFromNow.setDate(ninetyDaysFromNow.getDate() + 90);
+      const expiringSoon = await Medicine.countDocuments({
+        status: 'ACTIVE',
+        expDate: { $lte: ninetyDaysFromNow.toISOString().split('T')[0] }
+      });
+
+      stats = {
+        totalMedicines,
+        activeBatches,
+        blockedBatches,
+        totalScans,
+        genuineScans,
+        fakeScans,
+        expiringSoon,
+        recentScans
+      };
+    } else if (userRole === 'CUSTOMER') {
+      // Customer stats
+      const purchases = await Medicine.find({
+        'ownerHistory.owner': new RegExp(`^${userEmail}$`, 'i'),
+        'ownerHistory.action': 'PURCHASED'
+      });
+
+      let totalPurchased = 0;
+      let totalSpent = 0;
+      purchases.forEach(med => {
+        med.ownerHistory.forEach(h => {
+          if (h.action === 'PURCHASED' && h.owner.toLowerCase() === userEmail) {
+            totalPurchased += h.unitsPurchased || 0;
+            totalSpent += (h.unitsPurchased || 0) * (med.price || 0);
+          }
+        });
+      });
+
+      stats = {
+        totalPurchases: purchases.length,
+        totalUnitsPurchased: totalPurchased,
+        totalSpent: totalSpent.toFixed(2),
+        uniqueMedicines: purchases.length
+      };
+    } else {
+      // Manufacturer, Distributor, Pharmacy stats
+      const ownedMedicines = await Medicine.find({ 
+        currentOwner: new RegExp(`^${userEmail}$`, 'i') 
+      });
+
+      let totalUnits = 0;
+      let totalValue = 0;
+      let lowStock = 0;
+      let expiringSoon = 0;
+
+      const ninetyDaysFromNow = new Date();
+      ninetyDaysFromNow.setDate(ninetyDaysFromNow.getDate() + 90);
+
+      ownedMedicines.forEach(med => {
+        totalUnits += med.remainingUnits || 0;
+        totalValue += (med.remainingUnits || 0) * (med.price || 0);
+        
+        if (med.remainingUnits <= med.reorderPoint) {
+          lowStock++;
+        }
+
+        if (new Date(med.expDate) <= ninetyDaysFromNow) {
+          expiringSoon++;
+        }
+      });
+
+      // Count transfers made
+      const transfersMade = await Medicine.countDocuments({
+        'ownerHistory': {
+          $elemMatch: {
+            from: new RegExp(`^${userEmail}$`, 'i'),
+            action: 'TRANSFERRED'
+          }
+        }
+      });
+
+      stats = {
+        totalBatches: ownedMedicines.length,
+        totalUnits,
+        totalValue: totalValue.toFixed(2),
+        lowStock,
+        expiringSoon,
+        transfersMade,
+        activeBatches: ownedMedicines.filter(m => m.status === 'ACTIVE').length
+      };
+    }
+
+    res.json({ success: true, stats, role: userRole });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ Get expiring medicines (with days until expiry)
+app.get("/analytics/expiring", clerkAuth, async (req, res) => {
+  try {
+    const { days = 90 } = req.query;
+    const userEmail = req.user.email.toLowerCase();
+    const userRole = req.user.role;
+
+    const daysFromNow = new Date();
+    daysFromNow.setDate(daysFromNow.getDate() + parseInt(days));
+
+    let query = {
+      status: 'ACTIVE',
+      expDate: { $lte: daysFromNow.toISOString().split('T')[0] }
+    };
+
+    // Non-admin users see only their medicines
+    if (userRole !== 'ADMIN') {
+      query.currentOwner = new RegExp(`^${userEmail}$`, 'i');
+    }
+
+    const medicines = await Medicine.find(query).sort({ expDate: 1 });
+
+    // Calculate days until expiry for each
+    const withDays = medicines.map(med => {
+      const expDate = new Date(med.expDate);
+      const today = new Date();
+      const daysUntilExpiry = Math.ceil((expDate - today) / (1000 * 60 * 60 * 24));
+      
+      return {
+        ...med.toObject(),
+        daysUntilExpiry,
+        isExpired: daysUntilExpiry < 0
+      };
+    });
+
+    res.json({ 
+      success: true, 
+      count: withDays.length,
+      medicines: withDays 
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ Get low stock medicines
+app.get("/analytics/low-stock", clerkAuth, async (req, res) => {
+  try {
+    const userEmail = req.user.email.toLowerCase();
+    const userRole = req.user.role;
+
+    let query = {
+      status: 'ACTIVE',
+      $expr: { $lte: ['$remainingUnits', '$reorderPoint'] }
+    };
+
+    // Non-admin users see only their medicines
+    if (userRole !== 'ADMIN') {
+      query.currentOwner = new RegExp(`^${userEmail}$`, 'i');
+    }
+
+    const medicines = await Medicine.find(query).sort({ remainingUnits: 1 });
+
+    res.json({ 
+      success: true, 
+      count: medicines.length,
+      medicines 
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ======================================
+   ✅ NOTIFICATION ROUTES
+====================================== */
+
+// ✅ Get user notifications
+app.get("/notifications", clerkAuth, async (req, res) => {
+  try {
+    const { unreadOnly = false, limit = 50 } = req.query;
+    const userId = req.user.email;
+
+    let query = { userId };
+    if (unreadOnly === 'true') {
+      query.read = false;
+    }
+
+    const notifications = await Notification.find(query)
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit));
+
+    const unreadCount = await Notification.countDocuments({ userId, read: false });
+
+    res.json({ 
+      success: true, 
+      count: notifications.length,
+      unreadCount,
+      notifications 
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ Mark notification as read
+app.put("/notifications/:id/read", clerkAuth, async (req, res) => {
+  try {
+    const notification = await Notification.findOneAndUpdate(
+      { _id: req.params.id, userId: req.user.email },
+      { read: true },
+      { new: true }
+    );
+
+    if (!notification) {
+      return res.status(404).json({ error: "Notification not found" });
+    }
+
+    res.json({ success: true, notification });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ Mark all notifications as read
+app.put("/notifications/read-all", clerkAuth, async (req, res) => {
+  try {
+    await Notification.updateMany(
+      { userId: req.user.email, read: false },
+      { read: true }
+    );
+
+    res.json({ success: true, message: "All notifications marked as read" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ Delete notification
+app.delete("/notifications/:id", clerkAuth, async (req, res) => {
+  try {
+    await Notification.findOneAndDelete({ 
+      _id: req.params.id, 
+      userId: req.user.email 
+    });
+
+    res.json({ success: true, message: "Notification deleted" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ Helper function to create notification
+async function createNotification(userId, type, title, message, batchID = "", priority = "normal", metadata = {}) {
+  try {
+    await Notification.create({
+      userId,
+      type,
+      title,
+      message,
+      batchID,
+      priority,
+      metadata
+    });
+  } catch (err) {
+    console.error("Failed to create notification:", err);
+  }
+}
+
+// ✅ Check and create expiry/low stock alerts (background job - call this periodically)
+app.post("/analytics/check-alerts", clerkAuth, authorizeRoles("ADMIN"), async (req, res) => {
+  try {
+    let alertsCreated = 0;
+
+    // Check for expiring medicines (30, 60, 90 days)
+    const medicines = await Medicine.find({ status: 'ACTIVE' });
+    
+    for (const med of medicines) {
+      const expDate = new Date(med.expDate);
+      const today = new Date();
+      const daysUntilExpiry = Math.ceil((expDate - today) / (1000 * 60 * 60 * 24));
+
+      // Alert at 90, 60, and 30 days
+      if ([90, 60, 30].includes(daysUntilExpiry)) {
+        await createNotification(
+          med.currentOwner,
+          'EXPIRY_ALERT',
+          `Medicine Expiring in ${daysUntilExpiry} Days`,
+          `${med.name} (Batch: ${med.batchID}) will expire on ${med.expDate}`,
+          med.batchID,
+          daysUntilExpiry <= 30 ? 'high' : 'normal'
+        );
+        alertsCreated++;
+      }
+
+      // Low stock alert
+      if (med.remainingUnits <= med.reorderPoint && med.remainingUnits > 0) {
+        await createNotification(
+          med.currentOwner,
+          'LOW_STOCK',
+          'Low Stock Alert',
+          `${med.name} (Batch: ${med.batchID}) has only ${med.remainingUnits} units remaining`,
+          med.batchID,
+          'high'
+        );
+        alertsCreated++;
+      }
+    }
+
+    res.json({ 
+      success: true, 
+      message: `Created ${alertsCreated} alerts`,
+      alertsCreated 
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
