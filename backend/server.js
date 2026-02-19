@@ -1,3 +1,137 @@
+const { autoBlockSuspiciousBatches } = require("./utils/incidentResponse");
+// ✅ Admin: Automate Incident Response (Auto-block)
+app.post("/dashboard/incident-response", clerkAuth, authorizeRoles("ADMIN"), async (req, res) => {
+  try {
+    const { threshold } = req.body;
+    const blocked = await autoBlockSuspiciousBatches(threshold || 5);
+    res.json({ success: true, blocked });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+const { generateCertificate } = require("./utils/certificates");
+// ✅ Generate Digital Certificate for Batch
+app.post("/certificate", clerkAuth, authorizeRoles("ADMIN"), async (req, res) => {
+  try {
+    const { batchID, owner } = req.body;
+    if (!batchID || !owner) return res.status(400).json({ error: "batchID and owner required" });
+    const cert = generateCertificate(batchID, owner);
+    res.json({ success: true, certificate: cert });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+const { retrainFraudModel } = require("./utils/mlTraining");
+// ✅ Admin: Retrain Fraud Detection Model
+app.post("/dashboard/retrain-ml", clerkAuth, authorizeRoles("ADMIN"), async (req, res) => {
+  try {
+    const { newData } = req.body;
+    const result = await retrainFraudModel(newData || []);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+const { getComplianceIssues } = require("./utils/compliance");
+// ✅ Regulatory Compliance Check (Admin)
+app.get("/dashboard/compliance", clerkAuth, authorizeRoles("ADMIN"), async (req, res) => {
+  try {
+    const issues = await getComplianceIssues();
+    res.json({ success: true, issues });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+const Feedback = require("./models/Feedback");
+// ✅ User Feedback/Dispute Submission
+app.post("/feedback", clerkAuth, async (req, res) => {
+  try {
+    const { batchID, message } = req.body;
+    const user = req.user.id || req.user.sub || req.user._id;
+    const feedback = await Feedback.create({ user, batchID, message });
+    res.json({ success: true, feedback });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ Admin: List All Feedback/Disputes
+app.get("/feedback", clerkAuth, authorizeRoles("ADMIN"), async (req, res) => {
+  try {
+    const feedbacks = await Feedback.find().sort({ createdAt: -1 });
+    res.json({ success: true, feedbacks });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ Admin: Update Feedback/Dispute Status
+app.put("/feedback/:id", clerkAuth, authorizeRoles("ADMIN"), async (req, res) => {
+  try {
+    const { status } = req.body;
+    const feedback = await Feedback.findByIdAndUpdate(req.params.id, { status, updatedAt: new Date() }, { new: true });
+    res.json({ success: true, feedback });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+const { getAnalytics } = require("./utils/analytics");
+// ✅ Analytics & Reporting Dashboard (Admin)
+app.get("/dashboard/analytics", clerkAuth, authorizeRoles("ADMIN"), async (req, res) => {
+  try {
+    const analytics = await getAnalytics();
+    res.json({ success: true, analytics });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+const { getOfflinePayload, verifyOfflinePayload } = require("./utils/offlineVerification");
+// ✅ Mobile: Get Offline Verification Payload for a Batch
+app.get("/mobile/offline-payload/:batchID", clerkAuth, async (req, res) => {
+  try {
+    const med = await Medicine.findOne({ batchID: req.params.batchID });
+    if (!med) return res.status(404).json({ error: "Batch not found" });
+    res.json({ success: true, payload: getOfflinePayload(med) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ Mobile: Sync Offline Scan Logs
+app.post("/mobile/sync-scan-logs", clerkAuth, async (req, res) => {
+  try {
+    const logs = req.body.logs || [];
+    let saved = 0;
+    for (const log of logs) {
+      // Optionally verify integrity here
+      await ScanLog.create(log);
+      saved++;
+    }
+    res.json({ success: true, saved });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+// ✅ Mobile: Get Scan History for User
+app.get("/mobile/scan-history", clerkAuth, async (req, res) => {
+  try {
+    const userId = req.user.id || req.user.sub || req.user._id;
+    const logs = await ScanLog.find({ user: userId }).sort({ time: -1 });
+    res.json({ success: true, count: logs.length, logs });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+const { getScanLocations } = require("./utils/geoDashboard");
+// ✅ Geolocation Visualization Dashboard (Admin)
+app.get("/dashboard/geo", clerkAuth, authorizeRoles("ADMIN"), async (req, res) => {
+  try {
+    const locations = await getScanLocations();
+    res.json({ success: true, locations });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
@@ -10,6 +144,12 @@ const Medicine = require("./models/Medicine");
 const ScanLog = require("./models/ScanLog");
 const Notification = require("./models/Notification");
 const { clerkAuth, authorizeRoles } = require("./middleware/clerkAuth");
+const rateLimit = require("express-rate-limit");
+const mongoSanitize = require("express-mongo-sanitize");
+const { calculateTrustScore, computeIntegrityHash } = require("./ai/fraudDetection");
+const AuditLog = require("./models/AuditLog");
+const { sendNotification } = require("./utils/notification");
+const { filterMedicineByRole } = require("./utils/roleViews");
 
 // Constants
 const DEFAULT_CUSTOMER_EMAIL = "CUSTOMER";
@@ -40,6 +180,15 @@ app.use(cors({
 }));
 
 app.use(express.json());
+// NoSQL injection protection
+app.use(mongoSanitize());
+
+// API rate limiting
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100
+});
+app.use("/api/", apiLimiter);
 
 // Request logging middleware
 app.use((req, res, next) => {
@@ -838,13 +987,26 @@ app.get("/medicine/verify/:batchID", async (req, res) => {
   try {
     const batchID = req.params.batchID;
     const sig = req.query.sig;
+    const location = req.query.location || "UNKNOWN";
+    const deviceId = req.query.deviceId || "UNKNOWN";
+    const user = req.query.user || "UNKNOWN";
 
     const expectedSig = signBatch(batchID);
     if (!sig || sig !== expectedSig) {
       await ScanLog.create({
         batchID,
         result: "❌ FAKE (QR tampered)",
-        scanner: "UNKNOWN"
+        scanner: "UNKNOWN",
+        location,
+        deviceId,
+        user,
+        anomaly: true
+      });
+      await AuditLog.create({
+        action: "QR_VERIFICATION_FAIL",
+        user,
+        batchID,
+        details: { reason: "QR tampered/invalid", location, deviceId }
       });
       return res.json({ 
         success: false,
@@ -858,7 +1020,17 @@ app.get("/medicine/verify/:batchID", async (req, res) => {
       await ScanLog.create({
         batchID,
         result: "❌ FAKE (Not Registered)",
-        scanner: "UNKNOWN"
+        scanner: "UNKNOWN",
+        location,
+        deviceId,
+        user,
+        anomaly: true
+      });
+      await AuditLog.create({
+        action: "QR_VERIFICATION_FAIL",
+        user,
+        batchID,
+        details: { reason: "Not Registered", location, deviceId }
       });
       return res.json({ 
         success: false,
@@ -871,7 +1043,17 @@ app.get("/medicine/verify/:batchID", async (req, res) => {
       await ScanLog.create({
         batchID,
         result: "❌ BLOCKED",
-        scanner: "UNKNOWN"
+        scanner: "UNKNOWN",
+        location,
+        deviceId,
+        user,
+        anomaly: true
+      });
+      await AuditLog.create({
+        action: "QR_VERIFICATION_FAIL",
+        user,
+        batchID,
+        details: { reason: "BLOCKED", location, deviceId }
       });
       return res.json({ 
         success: false,
@@ -881,20 +1063,67 @@ app.get("/medicine/verify/:batchID", async (req, res) => {
       });
     }
 
+    // External registry check
+    const { checkBatchWithExternalRegistry } = require("./utils/externalApi");
+    const extCheck = await checkBatchWithExternalRegistry(batchID);
+    // Tamper-evident packaging check
+    const { verifyTamperEvidence } = require("./utils/tamperPackaging");
+    const packagingCode = req.query.packagingCode || req.body?.packagingCode;
+    const tamperValid = verifyTamperEvidence(batchID, packagingCode);
+    // AI Trust Score
+    const { score, reasons } = await calculateTrustScore(batchID);
+    const anomaly = score < 70 || !extCheck.valid || !tamperValid;
+
+    // Log scan
     await ScanLog.create({
       batchID,
-      result: "✅ GENUINE",
-      scanner: "UNKNOWN"
+      result: anomaly ? "⚠️ SUSPICIOUS" : "✅ GENUINE",
+      scanner: user,
+      location,
+      deviceId,
+      user,
+      anomaly
     });
 
+    // Update trust score and integrity hash
+    med.trustScore = score;
+    med.integrityHash = computeIntegrityHash(med);
+    await med.save();
+
+    // Audit log
+    await AuditLog.create({
+      action: "QR_VERIFICATION",
+      user,
+      batchID,
+      details: { location, deviceId, score, reasons }
+    });
+
+    // Real-time notification for suspicious activity
+    if (anomaly) {
+      // Example: notify admin (replace with actual admin email)
+      sendNotification(
+        process.env.ADMIN_NOTIFY_EMAIL || "admin@example.com",
+        `Suspicious QR Scan Detected: ${batchID}`,
+        `A suspicious scan was detected for batch ${batchID} at location ${location} with device ${deviceId}.\nReasons: ${reasons.join(", ")}`
+      ).catch(console.error);
+    }
+
+    // Role-based data view
+    let role = req.user?.role || req.user?.publicMetadata?.role || "CUSTOMER";
+    const filteredMed = filterMedicineByRole(med.toObject ? med.toObject() : med, role);
+    const { getMessage } = require("./utils/i18n");
+    const lang = req.query.lang || "en";
     res.json({
       success: true,
       batchID,
-      result: "✅ GENUINE Medicine Verified",
-      details: med,
-      ownerHistory: med.ownerHistory
+      result: anomaly ? getMessage("suspicious", lang) : getMessage("verified", lang),
+      trustScore: score,
+      reasons: !tamperValid ? ["Failed tamper-evident packaging check", ...reasons] : (extCheck.valid ? reasons : ["Failed external registry check", ...reasons]),
+      details: filteredMed,
+      ownerHistory: filteredMed.ownerHistory,
+      externalRegistry: extCheck,
+      tamperPackaging: tamperValid
     });
-
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

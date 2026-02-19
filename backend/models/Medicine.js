@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 
+
 const MedicineSchema = new mongoose.Schema({
   batchID: { type: String, unique: true, required: true },
   name: String,
@@ -38,6 +39,10 @@ const MedicineSchema = new mongoose.Schema({
       notes: { type: String, default: "" } // Additional notes for the action
     }
   ],
+
+  trustScore: { type: Number, default: 100 },
+  integrityHash: { type: String },
+  audit: [{ type: mongoose.Schema.Types.ObjectId, ref: 'AuditLog' }],
 
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
