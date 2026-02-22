@@ -20,4 +20,12 @@ async function sendNotification(to, subject, text) {
   return transporter.sendMail(mailOptions);
 }
 
-module.exports = { sendNotification };
+async function sendNotification(userId, message) {
+  // For demo, just log
+  console.log(`Notification sent to user ${userId}: ${message}`);
+  // Integrate with email/SMS APIs as needed
+}
+
+module.exports = {
+  sendNotification,
+};
