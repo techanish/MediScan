@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useUser, useAuth, SignIn, SignedIn, SignedOut } from '@clerk/clerk-react';
 import { Dashboard } from './components/Dashboard';
-import { medicineAPI } from './utils/api';
+import { medicineAPI, blockchainAPI } from './utils/api';
 
 export interface User {
   name: string;
@@ -72,40 +72,30 @@ export function App() {
   }, [clerkUser, isLoaded]);
 
   // Load medicines when user is authenticated
-  useEffect(() => {
-    const loadMedicines = async () => {
-      if (!user) return;
-      
-      setIsLoadingMedicines(true);
-      try {
-        const token = await getToken();
-        if (!token) return;
+  const loadMedicines = useCallback(async () => {
+    if (!user) return;
 
-        // Load medicines based on user role
-        let filters = {};
-        
-        if (user.role === 'CUSTOMER') {
-          // Customers see their purchase history (no filters needed, backend handles it)
-          filters = {};
-        } else {
-          // Non-customers see medicines they own
-          filters = { owner: user.email };
-        }
-        
-        const response = await medicineAPI.list(token, filters);
-        
-        if (response.success && response.medicines) {
-          setMedicines(response.medicines);
-        }
-      } catch (error) {
-        console.error('Failed to load medicines:', error);
-      } finally {
-        setIsLoadingMedicines(false);
+    setIsLoadingMedicines(true);
+    try {
+      const token = await getToken();
+      if (!token) return;
+
+      const filters = user.role !== 'CUSTOMER' ? { owner: user.email } : {};
+      const response = await medicineAPI.list(token, filters);
+
+      if (response.success && response.medicines) {
+        setMedicines(response.medicines);
       }
-    };
-
-    loadMedicines();
+    } catch (error) {
+      console.error('Failed to load medicines:', error);
+    } finally {
+      setIsLoadingMedicines(false);
+    }
   }, [user, getToken]);
+
+  useEffect(() => {
+    loadMedicines();
+  }, [loadMedicines]);
 
   const handleLogout = () => {
     setUser(null);
@@ -124,9 +114,6 @@ export function App() {
       const token = await getToken();
       if (!token) return { success: false, error: 'Failed to get authentication token' };
 
-      console.log('Registering medicine:', medicine);
-      console.log('Using token:', token ? 'Token present' : 'No token');
-
       const response = await medicineAPI.register(token, {
         batchID: medicine.batchID,
         name: medicine.name,
@@ -136,15 +123,22 @@ export function App() {
         totalUnits: medicine.totalUnits,
       });
 
-      console.log('Register response:', response);
-
       if (response.success) {
+        // Record registration on blockchain (fire-and-forget)
+        blockchainAPI.addBlock(token, {
+          action: 'REGISTER',
+          batchID: medicine.batchID,
+          name: medicine.name,
+          manufacturer: medicine.manufacturer,
+          totalUnits: medicine.totalUnits,
+          registeredBy: user.email,
+          timestamp: new Date().toISOString(),
+        }).catch(() => {});
         // Reload medicines to get the updated list
-        // const listResponse = await medicineAPI.list(token, { owner: user.email });
-        // if (listResponse.success && listResponse.medicines) {
-        //   setMedicines(listResponse.medicines);
-        // }
-        console.log("Medicine registered successfully");
+        const listResponse = await medicineAPI.list(token, { owner: user.email });
+        if (listResponse.success && listResponse.medicines) {
+          setMedicines(listResponse.medicines);
+        }
         return { success: true };
       }
 
@@ -154,7 +148,6 @@ export function App() {
       return { success: false, error: error.message || 'Registration failed from back end' };
     }
   };
-  // this did not fix that ?
 
   const handleTransfer = async (batchID: string, newOwnerEmail: string, newOwnerRole: string, unitsToTransfer: number) => {
     if (!user) return { success: false, error: 'Not authenticated' };
@@ -170,6 +163,16 @@ export function App() {
       });
 
       if (response.success) {
+        // Record transfer on blockchain (fire-and-forget)
+        blockchainAPI.addBlock(token, {
+          action: 'TRANSFER',
+          batchID,
+          from: user.email,
+          to: newOwnerEmail,
+          toRole: newOwnerRole,
+          unitsTransferred: unitsToTransfer,
+          timestamp: new Date().toISOString(),
+        }).catch(() => {});
         // Reload medicines to get the updated list
         const filters = user.role !== 'CUSTOMER' ? { owner: user.email } : {};
         const listResponse = await medicineAPI.list(token, filters);
@@ -198,6 +201,15 @@ export function App() {
       });
 
       if (response.success) {
+        // Record sale on blockchain (fire-and-forget)
+        blockchainAPI.addBlock(token, {
+          action: 'PURCHASE',
+          batchID,
+          soldBy: user.email,
+          soldTo: customerEmail,
+          unitsSold: unitsPurchased,
+          timestamp: new Date().toISOString(),
+        }).catch(() => {});
         // Reload medicines to get the updated list
         const filters = user.role !== 'CUSTOMER' ? { owner: user.email } : {};
         const listResponse = await medicineAPI.list(token, filters);
@@ -217,30 +229,17 @@ export function App() {
     batchID: string
   ): Promise<{ verified: boolean; medicine?: Medicine; error?: string }> => {
     try {
-      console.log('🔍 Verifying medicine:', batchID);
-      
-      // Use the medicine list API with batchID parameter
       const token = await getToken();
-      console.log('Token obtained:', !!token);
-      
-      if (!token) {
-        console.error('No authentication token available');
-        return { verified: false, error: 'Authentication required' };
-      }
+      if (!token) return { verified: false, error: 'Authentication required' };
 
-      console.log('Calling medicineAPI.list with batchID:', batchID);
       const response = await medicineAPI.list(token, { batchID });
-      console.log('API response:', response);
-      
+
       if (response.success && response.medicines && response.medicines.length > 0) {
-        console.log('✅ Medicine found:', response.medicines[0]);
         return { verified: true, medicine: response.medicines[0] };
       }
-      
-      console.log('❌ Medicine not found in response');
+
       return { verified: false, error: 'Medicine not found in registry' };
     } catch (error: any) {
-      console.error('❌ Verification error:', error);
       return { verified: false, error: error.message || 'Verification failed' };
     }
   };
@@ -315,6 +314,7 @@ export function App() {
             onPurchase={handlePurchase}
             onVerify={handleVerify}
             getMedicineByBatch={getMedicineByBatch}
+            onRefreshMedicines={loadMedicines}
           />
         )}
       </SignedIn>

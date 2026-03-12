@@ -29,8 +29,6 @@ export function GenerateQR({ getMedicineByBatch }: GenerateQRProps) {
     setIsGenerating(true);
     setError(null);
 
-    await new Promise((resolve) => setTimeout(resolve, 300));
-
     const med = getMedicineByBatch(batchID);
     if (!med) {
       setError('Medicine not found');

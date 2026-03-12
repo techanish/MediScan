@@ -49,9 +49,8 @@ const MedicineSchema = new mongoose.Schema({
 });
 
 // Update timestamp on save
-MedicineSchema.pre('save', function(next) {
+MedicineSchema.pre('save', async function() {
   this.updatedAt = new Date();
-  next();
 });
 
 module.exports = mongoose.model("Medicine", MedicineSchema);

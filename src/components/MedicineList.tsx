@@ -215,8 +215,8 @@ export function MedicineList({ medicines, userRole, userEmail, isLoading = false
                          <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
                              <Box className="w-4 h-4 text-slate-400" />
                              <span>
-                                {totalTransferredUnits > 0 
-                                  ? `${totalTransferredUnits}/${totalTransferredUnits}`
+                                {totalTransferredUnits > 0
+                                  ? `${totalTransferredUnits}/${medicine.totalUnits}`
                                   : `${medicine.remainingUnits ?? medicine.totalUnits}/${medicine.totalUnits}`
                                 } units
                              </span>

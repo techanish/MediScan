@@ -243,6 +243,32 @@ export const companiesAPI = {
 };
 
 // ============================================
+// BLOCKCHAIN API
+// ============================================
+
+export const blockchainAPI = {
+  /**
+   * Add a block to the blockchain
+   */
+  addBlock: async (sessionToken: string, data: object) => {
+    return fetchAPI('/blockchain/add', {
+      method: 'POST',
+      headers: getAuthHeaders(sessionToken),
+      body: JSON.stringify({ data }),
+    });
+  },
+
+  /**
+   * Get the full blockchain
+   */
+  getChain: async (sessionToken: string) => {
+    return fetchAPI('/blockchain/chain', {
+      headers: getAuthHeaders(sessionToken),
+    });
+  },
+};
+
+// ============================================
 // HEALTH CHECK
 // ============================================
 
@@ -259,5 +285,6 @@ export default {
   auth: authAPI,
   medicine: medicineAPI,
   logs: logsAPI,
+  blockchain: blockchainAPI,
   health: healthAPI,
 };

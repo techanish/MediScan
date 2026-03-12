@@ -17,213 +17,6 @@ const AuditLog = require("./models/AuditLog");
 const { sendNotification } = require("./utils/notification");
 const { filterMedicineByRole } = require("./utils/roleViews");
 
-// Constants
-const DEFAULT_CUSTOMER_EMAIL = "CUSTOMER";
-
-const app = express();
-
-// CORS configuration - allow multiple origins
-const allowedOrigins = [
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-  'http://10.9.5.204:5173',
-  process.env.FRONTEND_URL
-].filter(Boolean);
-
-app.use(cors({
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl)
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      console.log(`⚠️  CORS blocked origin: ${origin}`);
-      callback(new Error('Not allowed by CORS'), false); // Block unknown origins
-    }
-  },
-  credentials: true
-}));
-
-app.use(express.json());
-// NoSQL injection protection
-app.use(mongoSanitize());
-
-// API rate limiting
-const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100
-});
-app.use("/api/", apiLimiter);
-
-// Request logging middleware
-app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} ${req.method} ${req.path}`);
-  next();
-});
-
-// MongoDB Connection
-mongoose.connect(process.env.MONGO_URL)
-  .then(() => console.log("✅ MongoDB Connected"))
-  .catch(err => {
-    console.error("❌ MongoDB Error:", err.message);
-    process.exit(1); // Exit if database connection fails
-  });
-
-const { autoBlockSuspiciousBatches } = require("./utils/incidentResponse");
-// ✅ Admin: Automate Incident Response (Auto-block)
-app.post("/dashboard/incident-response", clerkAuth, authorizeRoles("ADMIN"), async (req, res) => {
-  try {
-    const { threshold } = req.body;
-    const blocked = await autoBlockSuspiciousBatches(threshold || 5);
-    res.json({ success: true, blocked });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-const { generateCertificate } = require("./utils/certificates");
-// ✅ Generate Digital Certificate for Batch
-app.post("/certificate", clerkAuth, authorizeRoles("ADMIN"), async (req, res) => {
-  try {
-    const { batchID, owner } = req.body;
-    if (!batchID || !owner) return res.status(400).json({ error: "batchID and owner required" });
-    const cert = generateCertificate(batchID, owner);
-    res.json({ success: true, certificate: cert });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-const { retrainFraudModel } = require("./utils/mlTraining");
-// ✅ Admin: Retrain Fraud Detection Model
-app.post("/dashboard/retrain-ml", clerkAuth, authorizeRoles("ADMIN"), async (req, res) => {
-  try {
-    const { newData } = req.body;
-    const result = await retrainFraudModel(newData || []);
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-const { getComplianceIssues } = require("./utils/compliance");
-// ✅ Regulatory Compliance Check (Admin)
-app.get("/dashboard/compliance", clerkAuth, authorizeRoles("ADMIN"), async (req, res) => {
-  try {
-    const issues = await getComplianceIssues();
-    res.json({ success: true, issues });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-const Feedback = require("./models/Feedback");
-// ✅ User Feedback/Dispute Submission
-app.post("/feedback", clerkAuth, async (req, res) => {
-  try {
-    const { batchID, message } = req.body;
-    const user = req.user.id || req.user.sub || req.user._id;
-    const feedback = await Feedback.create({ user, batchID, message });
-    res.json({ success: true, feedback });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ✅ Admin: List All Feedback/Disputes
-app.get("/feedback", clerkAuth, authorizeRoles("ADMIN"), async (req, res) => {
-  try {
-    const feedbacks = await Feedback.find().sort({ createdAt: -1 });
-    res.json({ success: true, feedbacks });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ✅ Admin: Update Feedback/Dispute Status
-app.put("/feedback/:id", clerkAuth, authorizeRoles("ADMIN"), async (req, res) => {
-  try {
-    const { status } = req.body;
-    const feedback = await Feedback.findByIdAndUpdate(req.params.id, { status, updatedAt: new Date() }, { new: true });
-    res.json({ success: true, feedback });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-const { getAnalytics } = require("./utils/analytics");
-// ✅ Analytics & Reporting Dashboard (Admin)
-app.get("/dashboard/analytics", clerkAuth, authorizeRoles("ADMIN"), async (req, res) => {
-  try {
-    const analytics = await getAnalytics();
-    res.json({ success: true, analytics });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-const { getOfflinePayload, verifyOfflinePayload } = require("./utils/offlineVerification");
-// ✅ Mobile: Get Offline Verification Payload for a Batch
-app.get("/mobile/offline-payload/:batchID", clerkAuth, async (req, res) => {
-  try {
-    const med = await Medicine.findOne({ batchID: req.params.batchID });
-    if (!med) return res.status(404).json({ error: "Batch not found" });
-    res.json({ success: true, payload: getOfflinePayload(med) });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ✅ Mobile: Sync Offline Scan Logs
-app.post("/mobile/sync-scan-logs", clerkAuth, async (req, res) => {
-  try {
-    const logs = req.body.logs || [];
-    let saved = 0;
-    for (const log of logs) {
-      // Optionally verify integrity here
-      await ScanLog.create(log);
-      saved++;
-    }
-    res.json({ success: true, saved });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-// ✅ Mobile: Get Scan History for User
-app.get("/mobile/scan-history", clerkAuth, async (req, res) => {
-  try {
-    const userId = req.user.id || req.user.sub || req.user._id;
-    const logs = await ScanLog.find({ user: userId }).sort({ time: -1 });
-    res.json({ success: true, count: logs.length, logs });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-const { getScanLocations } = require("./utils/geoDashboard");
-// ✅ Geolocation Visualization Dashboard (Admin)
-app.get("/dashboard/geo", clerkAuth, authorizeRoles("ADMIN"), async (req, res) => {
-  try {
-    const locations = await getScanLocations();
-    res.json({ success: true, locations });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-});
-require("dotenv").config();
-const express = require("express");
-const cors = require("cors");
-const mongoose = require("mongoose");
-const QRCode = require("qrcode");
-const crypto = require("crypto");
-const { clerkClient } = require("@clerk/clerk-sdk-node");
-
-const Medicine = require("./models/Medicine");
-const ScanLog = require("./models/ScanLog");
-const Notification = require("./models/Notification");
-const { clerkAuth, authorizeRoles } = require("./middleware/clerkAuth");
-const rateLimit = require("express-rate-limit");
-const mongoSanitize = require("express-mongo-sanitize");
-const { calculateTrustScore, computeIntegrityHash } = require("./ai/fraudDetection");
-const AuditLog = require("./models/AuditLog");
-const { sendNotification } = require("./utils/notification");
-const { filterMedicineByRole } = require("./utils/roleViews");
-
 // Blockchain integration
 const blockchain = require("./utils/blockchain");
 
@@ -382,9 +175,6 @@ app.put("/auth/profile", clerkAuth, async (req, res) => {
   }
 });
 
-// Get list of companies (for transfer dropdown)
-app.get("/companies/list", clerkAuth, async (req, res) => {
-
 // =============================
 // Blockchain endpoints
 // =============================
@@ -409,6 +199,9 @@ app.get("/blockchain/chain", clerkAuth, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// Get list of companies (for transfer dropdown)
+app.get("/companies/list", clerkAuth, async (req, res) => {
   try {
     const { role } = req.query;
     const currentUserEmail = req.user.email.toLowerCase();

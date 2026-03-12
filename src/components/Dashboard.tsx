@@ -16,6 +16,8 @@ import {
   Bell,
   Moon,
   Sun,
+  Link2,
+  RefreshCw,
 } from 'lucide-react';
 import type { User as UserType, Medicine } from '../App';
 import { RegisterMedicine } from './RegisterMedicine';
@@ -27,6 +29,7 @@ import { PurchaseMedicine } from './PurchaseMedicine';
 import { Profile } from './Profile';
 import { Analytics } from './Analytics';
 import { Notifications } from './Notifications';
+import { BlockchainViewer } from './BlockchainViewer';
 import { useTheme } from '../utils/ThemeContext';
 
 interface DashboardProps {
@@ -41,9 +44,10 @@ interface DashboardProps {
   onPurchase: (batchID: string, unitsPurchased: number, customerEmail: string) => Promise<{ success: boolean; error?: string }>;
   onVerify: (batchID: string) => Promise<{ verified: boolean; medicine?: Medicine; error?: string }>;
   getMedicineByBatch: (batchID: string) => Medicine | undefined;
+  onRefreshMedicines: () => Promise<void>;
 }
 
-type Tab = 'overview' | 'analytics' | 'register' | 'transfer' | 'purchase' | 'qrcode' | 'verify' | 'notifications' | 'profile';
+type Tab = 'overview' | 'analytics' | 'register' | 'transfer' | 'purchase' | 'qrcode' | 'verify' | 'notifications' | 'profile' | 'blockchain';
 
 const roleBadgeStyles: Record<string, string> = {
   MANUFACTURER: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300',
@@ -63,12 +67,20 @@ export function Dashboard({
   onPurchase,
   onVerify,
   getMedicineByBatch,
+  onRefreshMedicines,
 }: DashboardProps) {
   const { signOut } = useClerk();
   const { getToken } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await onRefreshMedicines();
+    setIsRefreshing(false);
+  };
 
   const handleLogout = async () => {
     await signOut();
@@ -84,6 +96,7 @@ export function Dashboard({
     { id: 'qrcode' as Tab, label: 'QR Code', icon: QrCode, show: true },
     { id: 'verify' as Tab, label: 'Verify', icon: CheckCircle2, show: true },
     { id: 'notifications' as Tab, label: 'Notifications', icon: Bell, show: true },
+    { id: 'blockchain' as Tab, label: 'Blockchain', icon: Link2, show: true },
     { id: 'profile' as Tab, label: 'Profile', icon: User, show: true },
   ].filter((tab) => tab.show);
 
@@ -128,6 +141,7 @@ export function Dashboard({
               onClick={() => {
                 setActiveTab(tab.id);
                 setSidebarOpen(false);
+                if (tab.id === 'overview') handleRefresh();
               }}
               className={`
                 w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors
@@ -183,6 +197,16 @@ export function Dashboard({
           </div>
           
           <div className="flex items-center gap-3">
+             {activeTab === 'overview' && (
+               <button
+                 onClick={handleRefresh}
+                 disabled={isRefreshing}
+                 className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
+                 title="Refresh medicines"
+               >
+                 <RefreshCw className={`w-5 h-5 ${isRefreshing ? 'animate-spin' : ''}`} />
+               </button>
+             )}
              <button
                 onClick={toggleTheme}
                 className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
@@ -248,6 +272,7 @@ export function Dashboard({
               )}
               {activeTab === 'verify' && <VerifyMedicine onVerify={onVerify} />}
               {activeTab === 'notifications' && <Notifications />}
+              {activeTab === 'blockchain' && <BlockchainViewer />}
               {activeTab === 'profile' && (
                 <Profile user={user} getToken={getToken} onUpdate={() => {}} />
               )}

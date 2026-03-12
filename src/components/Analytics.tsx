@@ -55,7 +55,7 @@ export function Analytics({ user }: AnalyticsProps) {
       const token = await getToken();
       if (!token) return;
 
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/analytics/dashboard`, {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/analytics/dashboard`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },

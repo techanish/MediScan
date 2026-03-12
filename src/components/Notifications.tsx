@@ -19,6 +19,7 @@ interface NotificationsProps {
 
 export function Notifications({}: NotificationsProps = {}) {
   const { getToken } = useAuth();
+  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -34,7 +35,7 @@ export function Notifications({}: NotificationsProps = {}) {
       if (!token) return;
 
       const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/notifications?unreadOnly=${filter === 'unread'}`,
+        `${API_URL}/notifications?unreadOnly=${filter === 'unread'}`,
         {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -59,7 +60,7 @@ export function Notifications({}: NotificationsProps = {}) {
       const token = await getToken();
       if (!token) return;
 
-      await fetch(`${import.meta.env.VITE_API_URL}/notifications/${id}/read`, {
+      await fetch(`${API_URL}/notifications/${id}/read`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -77,7 +78,7 @@ export function Notifications({}: NotificationsProps = {}) {
       const token = await getToken();
       if (!token) return;
 
-      await fetch(`${import.meta.env.VITE_API_URL}/notifications/read-all`, {
+      await fetch(`${API_URL}/notifications/read-all`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -95,7 +96,7 @@ export function Notifications({}: NotificationsProps = {}) {
       const token = await getToken();
       if (!token) return;
 
-      await fetch(`${import.meta.env.VITE_API_URL}/notifications/${id}`, {
+      await fetch(`${API_URL}/notifications/${id}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`,

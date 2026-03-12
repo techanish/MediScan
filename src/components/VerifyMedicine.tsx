@@ -32,8 +32,6 @@ export function VerifyMedicine({ onVerify }: VerifyMedicineProps) {
     setIsVerifying(true);
     setResult(null);
 
-    await new Promise((resolve) => setTimeout(resolve, 800));
-
     const verifyResult = await onVerify(batchID);
     setResult(verifyResult);
     setIsVerifying(false);

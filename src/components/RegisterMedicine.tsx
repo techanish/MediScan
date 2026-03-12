@@ -156,7 +156,7 @@ export function RegisterMedicine({ onRegister }: RegisterMedicineProps) {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700">Batch ID</label>
+            <label className="text-sm font-medium text-gray-700 dark:text-slate-300">Batch ID</label>
             <div className="relative">
               <Hash className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
               <input
@@ -167,8 +167,8 @@ export function RegisterMedicine({ onRegister }: RegisterMedicineProps) {
                   setFieldErrors({ ...fieldErrors, batchID: '' });
                 }}
                 placeholder="e.g., BATCH-003"
-                className={`w-full pl-12 pr-4 py-3 bg-gray-50 border rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all ${
-                  fieldErrors.batchID ? 'border-red-300 bg-red-50' : 'border-gray-200'
+                className={`w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-slate-700 border rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all dark:text-white dark:placeholder-slate-400 ${
+                  fieldErrors.batchID ? 'border-red-300 bg-red-50 dark:border-red-700 dark:bg-red-900/20' : 'border-gray-200 dark:border-slate-600'
                 }`}
                 required
               />
@@ -179,7 +179,7 @@ export function RegisterMedicine({ onRegister }: RegisterMedicineProps) {
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700">Medicine Name</label>
+            <label className="text-sm font-medium text-gray-700 dark:text-slate-300">Medicine Name</label>
             <div className="relative">
               <Pill className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
               <input
@@ -190,8 +190,8 @@ export function RegisterMedicine({ onRegister }: RegisterMedicineProps) {
                   setFieldErrors({ ...fieldErrors, name: '' });
                 }}
                 placeholder="e.g., Aspirin 100mg"
-                className={`w-full pl-12 pr-4 py-3 bg-gray-50 border rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all ${
-                  fieldErrors.name ? 'border-red-300 bg-red-50' : 'border-gray-200'
+                className={`w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-slate-700 border rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all dark:text-white dark:placeholder-slate-400 ${
+                  fieldErrors.name ? 'border-red-300 bg-red-50 dark:border-red-700 dark:bg-red-900/20' : 'border-gray-200 dark:border-slate-600'
                 }`}
                 required
               />
@@ -203,7 +203,7 @@ export function RegisterMedicine({ onRegister }: RegisterMedicineProps) {
         </div>
 
         <div className="space-y-2">
-          <label className="text-sm font-medium text-gray-700">Manufacturer</label>
+          <label className="text-sm font-medium text-gray-700 dark:text-slate-300">Manufacturer</label>
           <div className="relative">
             <Building2 className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
             <input
@@ -214,8 +214,8 @@ export function RegisterMedicine({ onRegister }: RegisterMedicineProps) {
                 setFieldErrors({ ...fieldErrors, manufacturer: '' });
               }}
               placeholder="e.g., PharmaCorp Inc."
-              className={`w-full pl-12 pr-4 py-3 bg-gray-50 border rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all ${
-                fieldErrors.manufacturer ? 'border-red-300 bg-red-50' : 'border-gray-200'
+              className={`w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-slate-700 border rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all dark:text-white dark:placeholder-slate-400 ${
+                fieldErrors.manufacturer ? 'border-red-300 bg-red-50 dark:border-red-700 dark:bg-red-900/20' : 'border-gray-200 dark:border-slate-600'
               }`}
               required
             />
@@ -227,7 +227,7 @@ export function RegisterMedicine({ onRegister }: RegisterMedicineProps) {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700">Manufacturing Date</label>
+            <label className="text-sm font-medium text-gray-700 dark:text-slate-300">Manufacturing Date</label>
             <div className="relative">
               <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
               <input
@@ -238,8 +238,8 @@ export function RegisterMedicine({ onRegister }: RegisterMedicineProps) {
                   setFieldErrors({ ...fieldErrors, mfgDate: '' });
                 }}
                 max={new Date().toISOString().split('T')[0]}
-                className={`w-full pl-12 pr-4 py-3 bg-gray-50 border rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all ${
-                  fieldErrors.mfgDate ? 'border-red-300 bg-red-50' : 'border-gray-200'
+                className={`w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-slate-700 border rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all dark:text-white dark:placeholder-slate-400 ${
+                  fieldErrors.mfgDate ? 'border-red-300 bg-red-50 dark:border-red-700 dark:bg-red-900/20' : 'border-gray-200 dark:border-slate-600'
                 }`}
                 required
               />
@@ -250,7 +250,7 @@ export function RegisterMedicine({ onRegister }: RegisterMedicineProps) {
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700">Expiry Date</label>
+            <label className="text-sm font-medium text-gray-700 dark:text-slate-300">Expiry Date</label>
             <div className="relative">
               <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
               <input
@@ -261,8 +261,8 @@ export function RegisterMedicine({ onRegister }: RegisterMedicineProps) {
                   setFieldErrors({ ...fieldErrors, expDate: '' });
                 }}
                 min={formData.mfgDate || undefined}
-                className={`w-full pl-12 pr-4 py-3 bg-gray-50 border rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all ${
-                  fieldErrors.expDate ? 'border-red-300 bg-red-50' : 'border-gray-200'
+                className={`w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-slate-700 border rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all dark:text-white dark:placeholder-slate-400 ${
+                  fieldErrors.expDate ? 'border-red-300 bg-red-50 dark:border-red-700 dark:bg-red-900/20' : 'border-gray-200 dark:border-slate-600'
                 }`}
                 required
               />
@@ -274,7 +274,7 @@ export function RegisterMedicine({ onRegister }: RegisterMedicineProps) {
         </div>
 
         <div className="space-y-2">
-          <label className="text-sm font-medium text-gray-700">Total Units</label>
+          <label className="text-sm font-medium text-gray-700 dark:text-slate-300">Total Units</label>
           <div className="relative">
             <Package className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
             <input
@@ -287,8 +287,8 @@ export function RegisterMedicine({ onRegister }: RegisterMedicineProps) {
               placeholder="e.g., 1000"
               min="1"
               max="1000000"
-              className={`w-full pl-12 pr-4 py-3 bg-gray-50 border rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all ${
-                fieldErrors.totalUnits ? 'border-red-300 bg-red-50' : 'border-gray-200'
+              className={`w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-slate-700 border rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all dark:text-white dark:placeholder-slate-400 ${
+                fieldErrors.totalUnits ? 'border-red-300 bg-red-50 dark:border-red-700 dark:bg-red-900/20' : 'border-gray-200 dark:border-slate-600'
               }`}
               required
             />
@@ -296,7 +296,7 @@ export function RegisterMedicine({ onRegister }: RegisterMedicineProps) {
           {fieldErrors.totalUnits && (
             <p className="text-xs text-red-600 mt-1">{fieldErrors.totalUnits}</p>
           )}
-          <p className="text-xs text-gray-500">Number of units in this batch (1 - 1,000,000)</p>
+          <p className="text-xs text-gray-500 dark:text-slate-400">Number of units in this batch (1 - 1,000,000)</p>
         </div>
 
         <button
