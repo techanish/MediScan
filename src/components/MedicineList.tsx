@@ -1,268 +1,207 @@
-import { Package, Calendar, Building2, User, CheckCircle2, Box } from 'lucide-react';
+import React, { useState } from 'react';
 import type { Medicine } from '../App';
+import { Search, AlertCircle, CheckCircle, Package, Download, Trash2, Edit, AlertTriangle, Eye } from 'lucide-react';
+import { toast } from 'sonner';
+import { MedicineDetailsModal } from './MedicineDetailsModal';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './ui/select';
 
 interface MedicineListProps {
   medicines: Medicine[];
-  userRole: string;
-  userEmail?: string;
+  onNavigate?: (tab: string) => void;
   isLoading?: boolean;
 }
 
-const roleBadgeStyles: Record<string, string> = {
-  MANUFACTURER: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300',
-  DISTRIBUTOR: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300',
-  PHARMACY: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
-  CUSTOMER: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300',
-  ADMIN: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
-};
+export function MedicineList({ medicines, onNavigate, isLoading }: MedicineListProps) {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('ALL');
+  const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
+  const [selectedItems, setSelectedItems] = useState<string[]>([]);
+  const [viewingMedicine, setViewingMedicine] = useState<Medicine | null>(null);
 
-export function MedicineList({ medicines, userRole, userEmail, isLoading = false }: MedicineListProps) {
+  const categories = Array.from(new Set(medicines.map(m => m.category).filter(Boolean))) as string[];
 
-  const isExpired = (expDate: string) => {
-    return new Date(expDate) < new Date();
+  const filteredMedicines = medicines.filter(item => {
+    const matchesSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      item.batchID.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesStatus = statusFilter === 'ALL' || item.status === statusFilter;
+    const matchesCategory = categoryFilter === 'ALL' || item.category === categoryFilter;
+    return matchesSearch && matchesStatus && matchesCategory;
+  });
+
+  const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSelectedItems(e.target.checked ? filteredMedicines.map(m => m.batchID) : []);
   };
 
-  const isExpiringSoon = (expDate: string) => {
-    const exp = new Date(expDate);
-    const now = new Date();
-    const threeMonths = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
-    return exp > now && exp < threeMonths;
+  const handleSelectItem = (id: string) => {
+    setSelectedItems(prev => prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]);
   };
 
-  const getStockStatus = (totalUnits: number, remainingUnits: number = 0) => {
-    const percentage = (remainingUnits / totalUnits) * 100;
-    if (remainingUnits === 0) {
-      return { label: 'Out of Stock', color: 'text-red-600', bgColor: 'bg-red-100' };
-    } else if (percentage < 20) {
-      return { label: 'Low Stock', color: 'text-amber-600', bgColor: 'bg-amber-100' };
-    } else {
-      return { label: 'In Stock', color: 'text-green-600', bgColor: 'bg-green-100' };
-    }
+  const handleExport = () => {
+    if (filteredMedicines.length === 0) return;
+    const dataToExport = filteredMedicines.map(({ batchID, name, manufacturer, totalUnits, status, category, price }) => ({
+      batchID, name, manufacturer, totalUnits, status, category, price
+    }));
+    const headers = Object.keys(dataToExport[0]).join(',');
+    const rows = dataToExport.map(row => Object.values(row).join(','));
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers, ...rows].join('\n');
+    const link = document.createElement('a');
+    link.setAttribute('href', encodeURI(csvContent));
+    link.setAttribute('download', 'inventory_export.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success(`Exported ${filteredMedicines.length} records successfully`);
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-32">
+        <div className="w-10 h-10 border-4 border-gray-200 dark:border-gray-700 border-t-emerald-600 rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   return (
-    <div>
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-3">
-          <div className="w-10 h-10 bg-emerald-100 dark:bg-emerald-900/30 rounded-xl flex items-center justify-center">
-            <Package className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-          </div>
-          {userRole === 'CUSTOMER' ? 'My Purchase History' : 'Your Medicines'}
-
-        </h2>
-        <p className="text-slate-500 dark:text-slate-400 mt-1 ml-13">
-          {userRole === 'CUSTOMER'
-            ? 'Medicines you have purchased'
-            : 'Medicines currently under your ownership'}
-        </p>
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Inventory Management</h2>
+          <p className="text-gray-500 dark:text-gray-400 text-sm">Manage stock, track batches, and monitor status.</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <button onClick={handleExport} className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+            <Download className="w-4 h-4" /> Export
+          </button>
+          <button onClick={() => onNavigate?.('register')} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-medium transition-colors shadow-sm">
+            <Package className="w-4 h-4" /> Add New Batch
+          </button>
+        </div>
       </div>
 
-      {isLoading ? (
-        <div className="text-center py-16 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
-          <div className="w-16 h-16 border-4 border-slate-100 dark:border-slate-700 border-t-blue-600 rounded-full animate-spin mx-auto mb-4" />
-          <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-1">Loading...</h3>
-          <p className="text-slate-500 dark:text-slate-400">Please wait</p>
+      <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm flex flex-col md:flex-row gap-4 items-center justify-between">
+        <div className="relative w-full md:w-96">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input type="text" placeholder="Search by name or Batch ID..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10 pr-4 py-2.5 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 w-full transition-all text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500"
+          />
         </div>
-      ) : medicines.length === 0 ? (
-        <div className="text-center py-16 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
-          <div className="w-20 h-20 bg-slate-50 dark:bg-slate-700/50 rounded-full flex items-center justify-center mx-auto mb-4">
-            <Package className="w-10 h-10 text-slate-400" />
+        <div className="flex items-center gap-3 w-full md:w-auto overflow-x-auto pb-2 md:pb-0">
+          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+            <SelectTrigger className="px-4 py-2.5 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 min-w-[140px] text-gray-900 dark:text-white">
+              <SelectValue placeholder="Category" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">All Categories</SelectItem>
+              {categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="px-4 py-2.5 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 min-w-[140px] text-gray-900 dark:text-white">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">All Status</SelectItem>
+              <SelectItem value="ACTIVE">Active</SelectItem>
+              <SelectItem value="LOW_STOCK">Low Stock</SelectItem>
+              <SelectItem value="EXPIRED">Expired</SelectItem>
+              <SelectItem value="RECALLED">Recalled</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {selectedItems.length > 0 && (
+        <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-900/30 p-3 rounded-xl flex items-center justify-between">
+          <span className="text-sm font-medium text-emerald-800 dark:text-emerald-300 ml-2">{selectedItems.length} items selected</span>
+          <div className="flex gap-2">
+            <button className="p-2 hover:bg-white dark:hover:bg-emerald-900 rounded-lg text-emerald-700 dark:text-emerald-400 transition-colors"><Trash2 className="w-4 h-4" /></button>
+            <button className="p-2 hover:bg-white dark:hover:bg-emerald-900 rounded-lg text-emerald-700 dark:text-emerald-400 transition-colors"><Edit className="w-4 h-4" /></button>
           </div>
-          <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-1">
-            {userRole === 'CUSTOMER' ? 'No purchases yet' : 'No medicines found'}
-          </h3>
-          <p className="text-slate-500 dark:text-slate-400">
-            {userRole === 'MANUFACTURER'
-              ? 'Register your first medicine to get started'
-              : userRole === 'CUSTOMER'
-              ? 'Your purchase history will appear here'
-              : 'No medicines are currently assigned to you'}
-          </p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {medicines.map((medicine) => {
-            // For customers, calculate total units purchased from all their purchase entries
-            let totalPurchasedUnits = 0;
-            let totalTransferredUnits = 0;
-            let purchaseDates: string[] = [];
-            let transferDates: string[] = [];
-            
-            if (userRole === 'CUSTOMER' && userEmail) {
-              medicine.ownerHistory.forEach(h => {
-                if (h.action === 'PURCHASED' && 
-                    h.owner.toLowerCase() === userEmail.toLowerCase() &&
-                    h.unitsPurchased) {
-                  totalPurchasedUnits += h.unitsPurchased;
-                  if (h.time) {
-                    purchaseDates.push(new Date(h.time).toLocaleDateString());
-                  }
-                }
-              });
-            } else if (userEmail) {
-              // For non-customers, calculate units received via transfer minus transferred out and sold
-              let transferredOutUnits = 0;
-              let soldUnits = 0;
-              
-              medicine.ownerHistory.forEach(h => {
-                // Units received (either as manufacturer or via transfer)
-                if (h.action === 'REGISTERED' && h.owner.toLowerCase() === userEmail.toLowerCase()) {
-                  totalTransferredUnits += medicine.totalUnits || 0;
-                }
-                if (h.action === 'TRANSFERRED' && 
-                    h.owner.toLowerCase() === userEmail.toLowerCase() &&
-                    h.unitsPurchased) {
-                  totalTransferredUnits += h.unitsPurchased;
-                  if (h.time) {
-                    transferDates.push(new Date(h.time).toLocaleDateString());
-                  }
-                }
-                
-                // Units transferred out by this user
-                if (h.action === 'TRANSFERRED' && 
-                    (h as any).from?.toLowerCase() === userEmail.toLowerCase() &&
-                    h.unitsPurchased) {
-                  transferredOutUnits += h.unitsPurchased;
-                }
-                
-                // Units sold to customers by this user
-                if (h.action === 'PURCHASED' && 
-                    (h as any).from?.toLowerCase() === userEmail.toLowerCase() &&
-                    h.unitsPurchased) {
-                  soldUnits += h.unitsPurchased;
-                }
-              });
-              
-              // Available = received - transferred out - sold
-              totalTransferredUnits = totalTransferredUnits - transferredOutUnits - soldUnits;
-            }
-
-            return (
-              <div
-                key={medicine.batchID}
-                className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 hover:shadow-lg transition-all duration-300 group"
-              >
-                <div className="flex items-start justify-between mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg flex items-center justify-center group-hover:bg-emerald-100 dark:group-hover:bg-emerald-900/30 transition-colors">
-                      <Package className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-                    </div>
-                    <div className="min-w-0">
-                      <h3 className="font-semibold text-slate-900 dark:text-white truncate">{medicine.name}</h3>
-                      <p className="text-xs text-slate-500 font-mono truncate">{medicine.batchID}</p>
-                    </div>
-                  </div>
-                  {medicine.verified && (
-                    <CheckCircle2 className="w-5 h-5 text-emerald-500 flex-shrink-0" />
-                  )}
-                </div>
-
-                <div className="space-y-3 mb-4">
-                  <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
-                    <Building2 className="w-4 h-4 text-slate-400" />
-                    <span className="truncate">{medicine.manufacturer}</span>
-                  </div>
-
-                  {userRole === 'CUSTOMER' && totalPurchasedUnits > 0 && (
-                    <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-100 dark:border-emerald-900/20 space-y-1">
-                        <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400 font-medium text-sm">
-                            <CheckCircle2 className="w-4 h-4" />
-                            <span>Purchased: {totalPurchasedUnits} units</span>
-                        </div>
-                        {purchaseDates.length > 0 && (
-                            <div className="flex items-center gap-2 text-emerald-600/80 dark:text-emerald-400/80 text-xs pl-6">
-                                <Calendar className="w-3 h-3" />
-                                <span>{purchaseDates.join(', ')}</span>
-                            </div>
-                        )}
-                    </div>
-                  )}
-
-                  {userRole !== 'CUSTOMER' && totalTransferredUnits > 0 && (
-                     <div className="p-3 rounded-lg bg-purple-50 dark:bg-purple-900/10 border border-purple-100 dark:border-purple-900/20 space-y-1">
-                        <div className="flex items-center gap-2 text-purple-700 dark:text-purple-400 font-medium text-sm">
-                            <Package className="w-4 h-4" />
-                            <span>Received: {totalTransferredUnits} units</span>
-                        </div>
-                        {transferDates.length > 0 && (
-                            <div className="flex items-center gap-2 text-purple-600/80 dark:text-purple-400/80 text-xs pl-6">
-                                <Calendar className="w-3 h-3" />
-                                <span>{transferDates.join(', ')}</span>
-                            </div>
-                        )}
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                     <div className="flex items-center gap-2 text-slate-500">
-                        <Calendar className="w-3.5 h-3.5" />
-                        <span>MFG: {medicine.mfgDate}</span>
-                     </div>
-                     <div className="flex items-center gap-2">
-                        <Calendar className="w-3.5 h-3.5 text-slate-500" />
-                        <span className={`${
-                            isExpired(medicine.expDate)
-                          ? 'text-red-600 font-medium'
-                          : isExpiringSoon(medicine.expDate)
-                          ? 'text-amber-600 font-medium'
-                          : 'text-slate-500'
-                        }`}>EXP: {medicine.expDate}</span>
-                     </div>
-                  </div>
-                  
-                  {userRole !== 'CUSTOMER' && medicine.totalUnits !== undefined && (
-                    <div className="flex items-center justify-between pt-2">
-                         <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
-                             <Box className="w-4 h-4 text-slate-400" />
-                             <span>
-                                {totalTransferredUnits > 0
-                                  ? `${totalTransferredUnits}/${medicine.totalUnits}`
-                                  : `${medicine.remainingUnits ?? medicine.totalUnits}/${medicine.totalUnits}`
-                                } units
-                             </span>
-                         </div>
-                         
-                         {(totalTransferredUnits > 0 || medicine.currentOwner.toLowerCase() === userEmail?.toLowerCase()) && (
-                             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                                totalTransferredUnits > 0 
-                                   ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
-                                   : medicine.remainingUnits === 0
-                                   ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
-                                   : (medicine.remainingUnits || 0) / medicine.totalUnits < 0.2
-                                   ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
-                                   : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
-                             }`}>
-                                {totalTransferredUnits > 0 ? 'In Stock' : getStockStatus(medicine.totalUnits, medicine.remainingUnits || 0).label}
-                             </span>
-                         )}
-                    </div>
-                  )}
-                  
-                  {userRole !== 'CUSTOMER' && (
-                     <div className="flex items-center gap-2 pt-3 mt-2 border-t border-slate-100 dark:border-slate-700">
-                        <User className="w-4 h-4 text-slate-400" />
-                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${roleBadgeStyles[medicine.currentOwnerRole ?? ''] || 'bg-slate-100 text-slate-600'}`}>
-                           {medicine.currentOwnerRole}
-                         </span>
-                     </div>
-                  )}
-
-                </div>
-                
-                 <div className="pt-3 mt-3 border-t border-slate-100 dark:border-slate-700">
-                    <p className="text-xs text-slate-500">
-                      {userRole === 'CUSTOMER' 
-                        ? `Purchased from ${medicine.currentOwner}`
-                        : `${medicine.ownerHistory.length} owner${medicine.ownerHistory.length !== 1 ? 's' : ''} in chain`
-                      }
-                    </p>
-                  </div>
-
-              </div>
-            );
-          })}
         </div>
       )}
+
+      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-gray-50/50 dark:bg-gray-900/50 border-b border-gray-100 dark:border-gray-700">
+              <tr>
+                <th className="px-4 py-4 w-12">
+                  <input type="checkbox" onChange={handleSelectAll} checked={filteredMedicines.length > 0 && selectedItems.length === filteredMedicines.length}
+                    className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 dark:bg-gray-700 dark:border-gray-600" />
+                </th>
+                <th className="px-6 py-4 font-semibold text-gray-500 dark:text-gray-400">Medicine Info</th>
+                <th className="px-6 py-4 font-semibold text-gray-500 dark:text-gray-400">Category</th>
+                <th className="px-6 py-4 font-semibold text-gray-500 dark:text-gray-400">Stock & Price</th>
+                <th className="px-6 py-4 font-semibold text-gray-500 dark:text-gray-400">Location</th>
+                <th className="px-6 py-4 font-semibold text-gray-500 dark:text-gray-400">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50 dark:divide-gray-700">
+              {filteredMedicines.map((item) => (
+                <tr key={item.batchID} onClick={() => setViewingMedicine(item)}
+                  className={`hover:bg-gray-50/50 dark:hover:bg-gray-700/50 transition-colors cursor-pointer ${selectedItems.includes(item.batchID) ? 'bg-emerald-50/30 dark:bg-emerald-900/10' : ''}`}>
+                  <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
+                    <input type="checkbox" checked={selectedItems.includes(item.batchID)} onChange={() => handleSelectItem(item.batchID)}
+                      className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 dark:bg-gray-700 dark:border-gray-600" />
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-gray-500 dark:text-gray-400 shrink-0">
+                        <Package className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="font-medium text-gray-900 dark:text-white">{item.name}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 font-mono mt-0.5">{item.batchID}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <span className="inline-flex px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded text-xs font-medium">
+                      {item.category || 'Uncategorized'}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="flex flex-col">
+                      <span className="font-medium text-gray-900 dark:text-white">{item.remainingUnits ?? '—'} units</span>
+                      <span className="text-xs text-gray-500 dark:text-gray-400">₹{item.price?.toFixed(2) ?? '0.00'}/unit</span>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 text-gray-600 dark:text-gray-300">{item.location || 'N/A'}</td>
+                  <td className="px-6 py-4">
+                    {item.status === 'ACTIVE' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/30"><CheckCircle className="w-3 h-3" /> Active</span>}
+                    {item.status === 'LOW_STOCK' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 border border-amber-100 dark:border-amber-900/30"><AlertTriangle className="w-3 h-3" /> Low Stock</span>}
+                    {item.status === 'EXPIRED' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border border-red-100 dark:border-red-900/30"><AlertCircle className="w-3 h-3" /> Expired</span>}
+                    {item.status === 'RECALLED' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border border-red-100 dark:border-red-900/30"><AlertCircle className="w-3 h-3" /> Recalled</span>}
+                    {!item.status && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-400"><Eye className="w-3 h-3" /> Unknown</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {filteredMedicines.length === 0 && (
+          <div className="p-12 text-center">
+            <Package className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
+            <h3 className="text-lg font-medium text-gray-900 dark:text-white">No medicines found</h3>
+            <p className="text-gray-500 dark:text-gray-400">Try adjusting your filters or search terms.</p>
+          </div>
+        )}
+        <div className="bg-gray-50 dark:bg-gray-700/50 px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
+          <span className="text-sm text-gray-500 dark:text-gray-400">Showing {filteredMedicines.length} results</span>
+          <div className="flex gap-2">
+            <button className="px-3 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-sm text-gray-600 dark:text-gray-300 disabled:opacity-50" disabled>Previous</button>
+            <button className="px-3 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-sm text-gray-600 dark:text-gray-300 disabled:opacity-50" disabled>Next</button>
+          </div>
+        </div>
+      </div>
+
+      <MedicineDetailsModal medicine={viewingMedicine} onClose={() => setViewingMedicine(null)} />
     </div>
   );
 }

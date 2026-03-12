@@ -1,10 +1,18 @@
-import { useState, useEffect } from 'react';
-import { ArrowRightLeft, Package, CheckCircle2, AlertCircle, Building2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Truck, AlertCircle, CheckCircle } from 'lucide-react';
 import type { Medicine } from '../App';
 import { companiesAPI } from '../utils/api';
+import { toast } from 'sonner';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './ui/select';
 
 interface TransferOwnershipProps {
-
   medicines: Medicine[];
   getToken: () => Promise<string | null>;
   onTransfer: (batchID: string, newOwnerEmail: string, newOwnerRole: string, unitsToTransfer: number) => Promise<{ success: boolean; error?: string }>;
@@ -17,94 +25,50 @@ interface Company {
   role: string;
 }
 
-// Helper to calculate available units for a user
 const getAvailableUnits = (medicine: Medicine, userEmail?: string): number => {
-  console.log('getAvailableUnits called:', {
-    batchID: medicine.batchID,
-    userEmail,
-    currentOwner: medicine.currentOwner,
-    remainingUnits: medicine.remainingUnits,
-    ownerHistory: medicine.ownerHistory
-  });
-  
-  if (!userEmail) {
-    console.log('No userEmail, returning remainingUnits:', medicine.remainingUnits);
-    return medicine.remainingUnits || 0;
-  }
-  
-  // Always calculate from ownerHistory for accurate tracking
+  if (!userEmail) return medicine.remainingUnits || 0;
+
   let receivedUnits = 0;
   let transferredOutUnits = 0;
   let soldUnits = 0;
-  
+
   medicine.ownerHistory.forEach(h => {
-    console.log('Checking ownerHistory entry:', h);
-    
-    // Units received (either as manufacturer or via transfer)
     if (h.action === 'REGISTERED' && h.owner.toLowerCase() === userEmail.toLowerCase()) {
       receivedUnits += medicine.totalUnits || 0;
-      console.log('Original owner, totalUnits:', medicine.totalUnits);
     }
-    if (h.action === 'TRANSFERRED' && 
-        h.owner.toLowerCase() === userEmail.toLowerCase() &&
-        h.unitsPurchased) {
-      console.log('Received units:', h.unitsPurchased);
+    if (h.action === 'TRANSFERRED' && h.owner.toLowerCase() === userEmail.toLowerCase() && h.unitsPurchased) {
       receivedUnits += h.unitsPurchased;
     }
-    
-    // Units transferred out by this user
-    if (h.action === 'TRANSFERRED' && 
-        (h as any).from?.toLowerCase() === userEmail.toLowerCase() &&
-        h.unitsPurchased) {
-      console.log('Transferred out units:', h.unitsPurchased);
+    if (h.action === 'TRANSFERRED' && (h as any).from?.toLowerCase() === userEmail.toLowerCase() && h.unitsPurchased) {
       transferredOutUnits += h.unitsPurchased;
     }
-    
-    // Units sold to customers by this user
-    if (h.action === 'PURCHASED' && 
-        (h as any).from?.toLowerCase() === userEmail.toLowerCase() &&
-        h.unitsPurchased) {
-      console.log('Sold units:', h.unitsPurchased);
+    if (h.action === 'PURCHASED' && (h as any).from?.toLowerCase() === userEmail.toLowerCase() && h.unitsPurchased) {
       soldUnits += h.unitsPurchased;
     }
   });
-  
-  const available = receivedUnits - transferredOutUnits - soldUnits;
-  console.log(`Total received: ${receivedUnits}, transferred out: ${transferredOutUnits}, sold: ${soldUnits}, available: ${available}`);
-  return available;
+
+  return receivedUnits - transferredOutUnits - soldUnits;
 };
 
 export function TransferOwnership({ medicines, getToken, onTransfer, userEmail }: TransferOwnershipProps) {
-  const [formData, setFormData] = useState({
-    batchID: '',
-    selectedCompany: '',
-    unitsToTransfer: '',
-  });
+  const [selectedBatch, setSelectedBatch] = useState('');
+  const [selectedCompanyEmail, setSelectedCompanyEmail] = useState('');
+  const [quantity, setQuantity] = useState('');
   const [companies, setCompanies] = useState<Company[]>([]);
   const [isLoadingCompanies, setIsLoadingCompanies] = useState(true);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedMedicine, setSelectedMedicine] = useState<Medicine | null>(null);
 
-  // Load companies on mount
+  const selectedMedicine = medicines.find(m => m.batchID === selectedBatch);
+  const selectedCompany = companies.find(c => c.email === selectedCompanyEmail);
+
   useEffect(() => {
     const loadCompanies = async () => {
       try {
         const token = await getToken();
-        if (!token) {
-          console.error('No token available for companies list');
-          return;
-        }
-
-        console.log('Fetching companies list...');
+        if (!token) return;
         const response = await companiesAPI.list(token);
-        console.log('Companies response:', response);
-        
         if (response.success && response.companies) {
-          console.log(`Loaded ${response.companies.length} companies:`, response.companies);
           setCompanies(response.companies);
-        } else {
-          console.error('Failed to load companies:', response);
         }
       } catch (error) {
         console.error('Failed to load companies:', error);
@@ -112,192 +76,185 @@ export function TransferOwnership({ medicines, getToken, onTransfer, userEmail }
         setIsLoadingCompanies(false);
       }
     };
-
     loadCompanies();
   }, [getToken]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!selectedMedicine || !selectedCompany) return;
+
+    const qty = parseInt(quantity);
+    if (isNaN(qty) || qty <= 0) {
+      toast.error('Please enter a valid quantity');
+      return;
+    }
+
+    const available = getAvailableUnits(selectedMedicine, userEmail);
+    if (qty > available) {
+      toast.error(`Only ${available} units available`);
+      return;
+    }
+
     setIsLoading(true);
-    setMessage(null);
-
-    if (!formData.selectedCompany) {
-      setMessage({ type: 'error', text: 'Please select a company' });
-      setIsLoading(false);
-      return;
-    }
-
-    const units = parseInt(formData.unitsToTransfer);
-    if (isNaN(units) || units <= 0) {
-      setMessage({ type: 'error', text: 'Please enter valid units' });
-      setIsLoading(false);
-      return;
-    }
-
-    if (selectedMedicine) {
-      const availableUnits = getAvailableUnits(selectedMedicine, userEmail);
-      if (units > availableUnits) {
-        setMessage({ type: 'error', text: `Only ${availableUnits} units available` });
-        setIsLoading(false);
-        return;
-      }
-    }
-
-    const selectedCompany = companies.find(c => c.email === formData.selectedCompany);
-    if (!selectedCompany) {
-      setMessage({ type: 'error', text: 'Invalid company selected' });
-      setIsLoading(false);
-      return;
-    }
-
-    const result = await onTransfer(
-      formData.batchID,
-      selectedCompany.email,
-      selectedCompany.role,
-      units
-    );
+    const result = await onTransfer(selectedBatch, selectedCompany.email, selectedCompany.role, qty);
+    setIsLoading(false);
 
     if (result.success) {
-      setMessage({ type: 'success', text: `${units} units transferred successfully!` });
-      setFormData({ batchID: '', selectedCompany: '', unitsToTransfer: '' });
-      setSelectedMedicine(null);
+      toast.success(`Transferred ${qty} units to ${selectedCompany.companyName}`);
+      setSelectedBatch('');
+      setSelectedCompanyEmail('');
+      setQuantity('');
     } else {
-      setMessage({ type: 'error', text: result.error || 'Transfer failed' });
+      toast.error(result.error || 'Transfer failed');
     }
-    setIsLoading(false);
   };
 
   return (
-    <div>
-      <div className="mb-6">
-        <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
-          <ArrowRightLeft className="w-6 h-6 text-emerald-600 dark:text-emerald-500" />
-          Transfer Ownership
-        </h2>
-        <p className="text-slate-500 dark:text-slate-400 mt-1">Transfer medicine ownership to another party</p>
+    <div className="max-w-3xl mx-auto">
+      <div className="mb-8">
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Transfer Stock</h2>
+        <p className="text-gray-500 dark:text-gray-400 mt-1">Move inventory to distributors or pharmacies</p>
       </div>
 
-      {medicines.length === 0 ? (
-        <div className="text-center py-12 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
-          <Package className="w-12 h-12 text-slate-300 dark:text-slate-600 mx-auto mb-3" />
-          <p className="text-slate-500 dark:text-slate-400">You don't own any medicines to transfer</p>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="md:col-span-2">
+          <form onSubmit={handleSubmit} className="bg-white dark:bg-gray-800 p-6 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm">
+            <div className="space-y-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Select Batch</label>
+                <Select value={selectedBatch} onValueChange={setSelectedBatch}>
+                  <SelectTrigger className="w-full px-4 py-6 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 text-gray-900 dark:text-gray-100">
+                    <SelectValue placeholder="Select a batch..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {medicines.length > 0 ? (
+                      medicines.map((m) => {
+                        const available = getAvailableUnits(m, userEmail);
+                        return (
+                          <SelectItem key={m.batchID} value={m.batchID} disabled={available <= 0}>
+                            {m.name} ({m.batchID}) — {available} units available
+                          </SelectItem>
+                        );
+                      })
+                    ) : (
+                      <SelectItem value="none" disabled>No medicines available</SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Transfer To Company</label>
+                <Select value={selectedCompanyEmail} onValueChange={setSelectedCompanyEmail} disabled={isLoadingCompanies}>
+                  <SelectTrigger className="w-full px-4 py-6 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 text-gray-900 dark:text-gray-100">
+                    <SelectValue placeholder={isLoadingCompanies ? 'Loading companies...' : 'Select a company...'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {companies.length > 0 ? (
+                      companies.map((c) => (
+                        <SelectItem key={c.email} value={c.email}>
+                          {c.companyName} ({c.role})
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <SelectItem value="none" disabled>
+                        {isLoadingCompanies ? 'Loading...' : 'No companies found'}
+                      </SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+                {companies.length === 0 && !isLoadingCompanies && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                    No companies found. Ask other users to set their company name in profile.
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Quantity to Transfer</label>
+                <input
+                  type="number"
+                  value={quantity}
+                  onChange={(e) => setQuantity(e.target.value)}
+                  placeholder="Enter quantity"
+                  min="1"
+                  max={selectedMedicine ? getAvailableUnits(selectedMedicine, userEmail) : undefined}
+                  className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+                  required
+                />
+                {selectedMedicine && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 text-right">
+                    Max available: {getAvailableUnits(selectedMedicine, userEmail)}
+                  </p>
+                )}
+              </div>
+
+              <button
+                type="submit"
+                disabled={isLoading || !selectedBatch || !selectedCompanyEmail || !quantity}
+                className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isLoading ? (
+                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <Truck className="w-5 h-5" />
+                    Initiate Transfer
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
         </div>
-      ) : (
-        <form onSubmit={handleSubmit} className="max-w-xl space-y-5">
-          {message && (
-            <div
-              className={`flex items-center gap-2 p-4 rounded-xl ${
-                message.type === 'success'
-                  ? 'bg-green-50 dark:bg-green-900/30 border border-green-100 dark:border-green-900/50 text-green-700 dark:text-green-300'
-                  : 'bg-red-50 dark:bg-red-900/30 border border-red-100 dark:border-red-900/50 text-red-700 dark:text-red-300'
-              }`}
-            >
-              {message.type === 'success' ? (
-                <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
-              ) : (
-                <AlertCircle className="w-5 h-5 flex-shrink-0" />
-              )}
-              {message.text}
-            </div>
-          )}
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Select Medicine</label>
-            <div className="relative">
-              <Package className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
-              <select
-                value={formData.batchID}
-                onChange={(e) => {
-                  const selected = medicines.find(m => m.batchID === e.target.value);
-                  setSelectedMedicine(selected || null);
-                  setFormData({ ...formData, batchID: e.target.value, unitsToTransfer: '' });
-                }}
-                className="w-full pl-12 pr-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all appearance-none text-slate-900 dark:text-white"
-                required
-              >
-                <option value="">Select a medicine batch</option>
-                {medicines.map((med) => {
-                  const availableUnits = getAvailableUnits(med, userEmail);
-                  return (
-                    <option key={med.batchID} value={med.batchID}>
-                      {med.batchID} - {med.name} ({availableUnits} units available)
-                    </option>
-                  );
-                })}
-              </select>
-            </div>
+        <div className="md:col-span-1 space-y-4">
+          <div className="bg-blue-50 dark:bg-blue-900/20 p-5 rounded-2xl border border-blue-100 dark:border-blue-800">
+            <h3 className="font-semibold text-blue-900 dark:text-blue-300 mb-2 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4" />
+              Transfer Policy
+            </h3>
+            <p className="text-sm text-blue-700 dark:text-blue-400 opacity-90 leading-relaxed">
+              Ownership transfers are recorded on the blockchain and cannot be undone. Ensure the recipient is correct before proceeding.
+            </p>
+          </div>
+
+          <AnimatePresence>
             {selectedMedicine && (
-              <p className="text-xs text-slate-600 dark:text-slate-400">
-                Available: {getAvailableUnits(selectedMedicine, userEmail)} units
-              </p>
-            )}
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Transfer To Company</label>
-            <div className="relative">
-              <Building2 className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
-              <select
-                value={formData.selectedCompany}
-                onChange={(e) => setFormData({ ...formData, selectedCompany: e.target.value })}
-                className="w-full pl-12 pr-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all appearance-none text-slate-900 dark:text-white"
-                required
-                disabled={isLoadingCompanies}
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.2 }}
+                className="bg-white dark:bg-gray-800 p-5 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm"
               >
-                <option value="">
-                  {isLoadingCompanies ? 'Loading companies...' : 'Select a company'}
-                </option>
-                {companies.map((company) => (
-                  <option key={company.email} value={company.email}>
-                    {company.companyName} ({company.role})
-                  </option>
-                ))}
-              </select>
-            </div>
-            {companies.length === 0 && !isLoadingCompanies && (
-              <p className="text-xs text-amber-600 dark:text-amber-400">
-                No companies found. Ask other users to set their company name in their profile.
-              </p>
+                <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4">Batch Details</h3>
+                <div className="space-y-3 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500 dark:text-gray-400">Name</span>
+                    <span className="font-medium text-gray-900 dark:text-gray-100">{selectedMedicine.name}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500 dark:text-gray-400">Expiry</span>
+                    <span className="font-medium text-gray-900 dark:text-gray-100">{selectedMedicine.expDate}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500 dark:text-gray-400">Manufacturer</span>
+                    <span className="font-medium text-gray-900 dark:text-gray-100 truncate ml-2">{selectedMedicine.manufacturer}</span>
+                  </div>
+                  <div className="pt-3 border-t border-gray-100 dark:border-gray-700">
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-500 dark:text-gray-400">Status</span>
+                      <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 px-2 py-1 rounded-full text-xs font-medium">
+                        <CheckCircle className="w-3 h-3" /> Verified
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
             )}
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Number of Units to Transfer</label>
-            <div className="relative">
-              <Package className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-              <input
-                type="number"
-                value={formData.unitsToTransfer}
-                onChange={(e) => setFormData({ ...formData, unitsToTransfer: e.target.value })}
-                max={selectedMedicine ? getAvailableUnits(selectedMedicine, userEmail) : undefined}
-                className="w-full pl-12 pr-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all text-slate-900 dark:text-white placeholder-slate-400"
-                required
-                disabled={!formData.batchID}
-              />
-            </div>
-            {selectedMedicine && (
-              <p className="text-xs text-emerald-600 dark:text-emerald-400">
-                Max: {getAvailableUnits(selectedMedicine, userEmail)} units
-              </p>
-            )}
-          </div>
-
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl shadow-lg shadow-emerald-200 dark:shadow-none hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-          >
-            {isLoading ? (
-              <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-            ) : (
-              <>
-                <ArrowRightLeft className="w-5 h-5" />
-                Transfer Ownership
-              </>
-            )}
-          </button>
-        </form>
-      )}
+          </AnimatePresence>
+        </div>
+      </div>
     </div>
   );
 }
