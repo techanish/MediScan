@@ -16,7 +16,6 @@ import {
   Bell,
   Moon,
   Sun,
-  LayoutDashboard
 } from 'lucide-react';
 import type { User as UserType, Medicine } from '../App';
 import { RegisterMedicine } from './RegisterMedicine';
@@ -37,10 +36,10 @@ interface DashboardProps {
   onLogout: () => void;
   onRegisterMedicine: (
     medicine: Omit<Medicine, 'currentOwner' | 'currentOwnerRole' | 'ownerHistory' | 'verified'>
-  ) => { success: boolean; error?: string };
+  ) => Promise<{ success: boolean; error?: string }>;
   onTransfer: (batchID: string, newOwnerEmail: string, newOwnerRole: string, unitsToTransfer: number) => Promise<{ success: boolean; error?: string }>;
   onPurchase: (batchID: string, unitsPurchased: number, customerEmail: string) => Promise<{ success: boolean; error?: string }>;
-  onVerify: (batchID: string) => { verified: boolean; medicine?: Medicine; error?: string };
+  onVerify: (batchID: string) => Promise<{ verified: boolean; medicine?: Medicine; error?: string }>;
   getMedicineByBatch: (batchID: string) => Medicine | undefined;
 }
 

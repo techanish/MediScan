@@ -3,14 +3,7 @@
  * Handles all backend API communications
  */
 
-const API_URL = "https://a6c6-139-5-248-251.ngrok-free.app";
-
-interface ApiResponse<T = any> {
-  success?: boolean;
-  error?: string;
-  message?: string;
-  data?: T;
-}
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 /**
  * Generic fetch wrapper with error handling

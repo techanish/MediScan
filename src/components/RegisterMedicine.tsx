@@ -5,7 +5,7 @@ import type { Medicine } from '../App';
 interface RegisterMedicineProps {
   onRegister: (
     medicine: Omit<Medicine, 'currentOwner' | 'currentOwnerRole' | 'ownerHistory' | 'verified'>
-  ) => { success: boolean; error?: string };
+  ) => Promise<{ success: boolean; error?: string }>;
 }
 
 export function RegisterMedicine({ onRegister }: RegisterMedicineProps) {
@@ -27,7 +27,6 @@ export function RegisterMedicine({ onRegister }: RegisterMedicineProps) {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const validateForm = () => {
     const errors: Record<string, string> = {};
@@ -117,7 +116,7 @@ export function RegisterMedicine({ onRegister }: RegisterMedicineProps) {
 
     if (result.success) {
       setMessage({ type: 'success', text: 'Medicine registered successfully!' });
-      setFormData({ batchID: '', name: '', manufacturer: '', mfgDate: '', expDate: '', totalUnits: '' });
+      setFormData({ batchID: '', name: '', manufacturer: '', mfgDate: '', expDate: '', totalUnits: '', category: 'General', description: '', dosage: '', composition: '', price: '', location: '', reorderPoint: '' });
       setFieldErrors({});
     } else {
       setMessage({ type: 'error', text: result.error || 'Registration failed' });

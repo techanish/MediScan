@@ -1,4 +1,4 @@
-import { Package, Calendar, Building2, User, CheckCircle2, AlertTriangle, Box } from 'lucide-react';
+import { Package, Calendar, Building2, User, CheckCircle2, Box } from 'lucide-react';
 import type { Medicine } from '../App';
 
 interface MedicineListProps {
@@ -241,7 +241,7 @@ export function MedicineList({ medicines, userRole, userEmail, isLoading = false
                   {userRole !== 'CUSTOMER' && (
                      <div className="flex items-center gap-2 pt-3 mt-2 border-t border-slate-100 dark:border-slate-700">
                         <User className="w-4 h-4 text-slate-400" />
-                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${roleBadgeStyles[medicine.currentOwnerRole] || 'bg-slate-100 text-slate-600'}`}>
+                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${roleBadgeStyles[medicine.currentOwnerRole ?? ''] || 'bg-slate-100 text-slate-600'}`}>
                            {medicine.currentOwnerRole}
                          </span>
                      </div>

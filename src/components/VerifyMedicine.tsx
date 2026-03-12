@@ -16,7 +16,7 @@ import type { Medicine } from '../App';
 
 
 interface VerifyMedicineProps {
-  onVerify: (batchID: string) => { verified: boolean; medicine?: Medicine; error?: string };
+  onVerify: (batchID: string) => Promise<{ verified: boolean; medicine?: Medicine; error?: string }>;
 }
 
 export function VerifyMedicine({ onVerify }: VerifyMedicineProps) {

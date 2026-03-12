@@ -1,3 +1,75 @@
+require("dotenv").config();
+const express = require("express");
+const cors = require("cors");
+const mongoose = require("mongoose");
+const QRCode = require("qrcode");
+const crypto = require("crypto");
+const { clerkClient } = require("@clerk/clerk-sdk-node");
+
+const Medicine = require("./models/Medicine");
+const ScanLog = require("./models/ScanLog");
+const Notification = require("./models/Notification");
+const { clerkAuth, authorizeRoles } = require("./middleware/clerkAuth");
+const rateLimit = require("express-rate-limit");
+const mongoSanitize = require("express-mongo-sanitize");
+const { calculateTrustScore, computeIntegrityHash } = require("./ai/fraudDetection");
+const AuditLog = require("./models/AuditLog");
+const { sendNotification } = require("./utils/notification");
+const { filterMedicineByRole } = require("./utils/roleViews");
+
+// Constants
+const DEFAULT_CUSTOMER_EMAIL = "CUSTOMER";
+
+const app = express();
+
+// CORS configuration - allow multiple origins
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://10.9.5.204:5173',
+  process.env.FRONTEND_URL
+].filter(Boolean);
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log(`⚠️  CORS blocked origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'), false); // Block unknown origins
+    }
+  },
+  credentials: true
+}));
+
+app.use(express.json());
+// NoSQL injection protection
+app.use(mongoSanitize());
+
+// API rate limiting
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100
+});
+app.use("/api/", apiLimiter);
+
+// Request logging middleware
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} ${req.method} ${req.path}`);
+  next();
+});
+
+// MongoDB Connection
+mongoose.connect(process.env.MONGO_URL)
+  .then(() => console.log("✅ MongoDB Connected"))
+  .catch(err => {
+    console.error("❌ MongoDB Error:", err.message);
+    process.exit(1); // Exit if database connection fails
+  });
+
 const { autoBlockSuspiciousBatches } = require("./utils/incidentResponse");
 // ✅ Admin: Automate Incident Response (Auto-block)
 app.post("/dashboard/incident-response", clerkAuth, authorizeRoles("ADMIN"), async (req, res) => {
@@ -132,77 +204,6 @@ app.get("/dashboard/geo", clerkAuth, authorizeRoles("ADMIN"), async (req, res) =
     res.status(500).json({ error: err.message });
   }
 });
-require("dotenv").config();
-const express = require("express");
-const cors = require("cors");
-const mongoose = require("mongoose");
-const QRCode = require("qrcode");
-const crypto = require("crypto");
-const { clerkClient } = require("@clerk/clerk-sdk-node");
-
-const Medicine = require("./models/Medicine");
-const ScanLog = require("./models/ScanLog");
-const Notification = require("./models/Notification");
-const { clerkAuth, authorizeRoles } = require("./middleware/clerkAuth");
-const rateLimit = require("express-rate-limit");
-const mongoSanitize = require("express-mongo-sanitize");
-const { calculateTrustScore, computeIntegrityHash } = require("./ai/fraudDetection");
-const AuditLog = require("./models/AuditLog");
-const { sendNotification } = require("./utils/notification");
-const { filterMedicineByRole } = require("./utils/roleViews");
-
-// Constants
-const DEFAULT_CUSTOMER_EMAIL = "CUSTOMER";
-
-const app = express();
-
-// CORS configuration - allow multiple origins
-const allowedOrigins = [
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-  'http://10.9.5.204:5173',
-  process.env.FRONTEND_URL
-].filter(Boolean);
-
-app.use(cors({
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl)
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      console.log(`⚠️  CORS blocked origin: ${origin}`);
-      callback(null, true); // Allow all in development
-    }
-  },
-  credentials: true
-}));
-
-app.use(express.json());
-// NoSQL injection protection
-app.use(mongoSanitize());
-
-// API rate limiting
-const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100
-});
-app.use("/api/", apiLimiter);
-
-// Request logging middleware
-app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} ${req.method} ${req.path}`);
-  next();
-});
-
-// MongoDB Connection
-mongoose.connect(process.env.MONGO_URL)
-  .then(() => console.log("✅ MongoDB Connected"))
-  .catch(err => {
-    console.error("❌ MongoDB Error:", err.message);
-    process.exit(1); // Exit if database connection fails
-  });
 
 // Debug endpoint to check medicines by owner (no auth needed for testing)
 app.get("/debug/medicines/:email", async (req, res) => {

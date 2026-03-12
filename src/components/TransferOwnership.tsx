@@ -268,7 +268,7 @@ export function TransferOwnership({ medicines, getToken, onTransfer, userEmail }
               <input
                 type="number"
                 value={formData.unitsToTransfer}
-                onChange={(e) => setFormData({ ...formData, unitsToTransfer: parseInt(e.target.value) || 0 })}
+                onChange={(e) => setFormData({ ...formData, unitsToTransfer: e.target.value })}
                 max={selectedMedicine ? getAvailableUnits(selectedMedicine, userEmail) : undefined}
                 className="w-full pl-12 pr-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all text-slate-900 dark:text-white placeholder-slate-400"
                 required
