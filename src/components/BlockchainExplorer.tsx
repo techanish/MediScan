@@ -201,6 +201,13 @@ function MedicineTracker({ chain, medicines, initialBatchID }: { chain: Block[];
                                   )}
                                 </div>
                                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{h.role} {h.unitsPurchased ? `• ${h.unitsPurchased} units` : ''}</p>
+                                {(h.ownerLocation || h.fromLocation) && (
+                                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                                    {h.action === 'TRANSFERRED'
+                                      ? `${h.fromLocation || 'Unknown'} -> ${h.ownerLocation || 'Unknown'}`
+                                      : (h.ownerLocation || h.fromLocation)}
+                                  </p>
+                                )}
                               </div>
                             </div>
                           );
@@ -464,7 +471,7 @@ export function BlockchainExplorer({ medicines }: BlockchainExplorerProps) {
               />
             </div>
             <select value={filterAction} onChange={e => setFilterAction(e.target.value)}
-              className="px-4 py-3 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                className="px-4 py-3 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500" title="Filter by action">
               <option value="ALL">All Actions</option>
               <option value="REGISTER">Register</option>
               <option value="TRANSFER">Transfer</option>

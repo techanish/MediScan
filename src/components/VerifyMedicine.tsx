@@ -148,6 +148,13 @@ export function VerifyMedicine({ medicines, onVerify }: VerifyMedicineProps) {
                           </p>
                           <p className="text-xs text-gray-500 dark:text-gray-400">{history.date || history.time}</p>
                           <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5 font-medium">{history.owner}</p>
+                          {(history.ownerLocation || history.fromLocation) && (
+                            <p className="text-xs text-gray-500 dark:text-gray-500 mt-0.5">
+                              {history.action === 'TRANSFERRED'
+                                ? `${history.fromLocation || 'Unknown'} → ${history.ownerLocation || 'Unknown'}`
+                                : (history.ownerLocation || history.fromLocation)}
+                            </p>
+                          )}
                         </div>
                       </div>
                     ))}

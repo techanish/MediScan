@@ -32,9 +32,11 @@ const MedicineSchema = new mongoose.Schema({
     {
       owner: String,
       role: String,
+      ownerLocation: { type: String, default: "" },
       action: String, // REGISTERED / TRANSFERRED / PURCHASED / BLOCKED / RECALLED
       unitsPurchased: { type: Number, default: 0 },
       from: String, // Who transferred/sold this (for tracking outgoing transfers/sales)
+      fromLocation: { type: String, default: "" },
       time: { type: Date, default: Date.now },
       notes: { type: String, default: "" } // Additional notes for the action
     }

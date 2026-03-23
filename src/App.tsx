@@ -38,7 +38,18 @@ export interface Medicine {
   remainingUnits?: number;
   currentOwner: string;
   currentOwnerRole?: string;
-  ownerHistory: { owner: string; role: string; date?: string; time?: string; action?: string; unitsPurchased?: number; from?: string; notes?: string }[];
+  ownerHistory: {
+    owner: string;
+    role: string;
+    ownerLocation?: string;
+    date?: string;
+    time?: string;
+    action?: string;
+    unitsPurchased?: number;
+    from?: string;
+    fromLocation?: string;
+    notes?: string;
+  }[];
   verified?: boolean;
   status?: string;
   category?: string;
@@ -174,6 +185,7 @@ function MediScanApp() {
         batchID: medicine.batchID!,
         name: medicine.name!,
         manufacturer: medicine.manufacturer!,
+        manufacturerLocation: medicine.location,
         mfgDate: medicine.mfgDate!,
         expDate: medicine.expDate!,
         totalUnits: medicine.totalUnits!,
@@ -188,6 +200,7 @@ function MediScanApp() {
         blockchainAPI.addBlock(token, {
           action: 'REGISTER', batchID: medicine.batchID, name: medicine.name,
           manufacturer: medicine.manufacturer, totalUnits: medicine.totalUnits,
+          manufacturerLocation: medicine.location,
           registeredBy: user.email, timestamp: new Date().toISOString(),
         }).catch(() => {});
         const listResponse = await medicineAPI.list(token, { owner: user.email });
@@ -200,15 +213,30 @@ function MediScanApp() {
     }
   };
 
-  const handleTransfer = async (batchID: string, newOwnerEmail: string, newOwnerRole: string, unitsToTransfer: number) => {
+  const handleTransfer = async (
+    batchID: string,
+    newOwnerEmail: string,
+    newOwnerRole: string,
+    unitsToTransfer: number,
+    fromLocation?: string,
+    toLocation?: string
+  ) => {
     if (!user) return { success: false, error: 'Not authenticated' };
     try {
       const token = await getToken();
       if (!token) return { success: false, error: 'Failed to get authentication token' };
-      const response = await medicineAPI.transfer(token, batchID, { newOwnerEmail, newOwnerRole, unitsToTransfer });
+      const response = await medicineAPI.transfer(token, batchID, {
+        newOwnerEmail,
+        newOwnerRole,
+        unitsToTransfer,
+        fromLocation,
+        toLocation,
+      });
       if (response.success) {
         blockchainAPI.addBlock(token, {
           action: 'TRANSFER', batchID, from: user.email, to: newOwnerEmail,
+          fromLocation,
+          toLocation,
           toRole: newOwnerRole, unitsTransferred: unitsToTransfer, timestamp: new Date().toISOString(),
         }).catch(() => {});
         const filters = user.role !== 'CUSTOMER' ? { owner: user.email } : {};

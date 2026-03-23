@@ -431,7 +431,7 @@ app.post("/medicine/register",
   async (req, res) => {
     try {
       const { 
-        batchID, name, manufacturer, mfgDate, expDate, totalUnits,
+        batchID, name, manufacturer, manufacturerLocation, mfgDate, expDate, totalUnits,
         category, description, dosage, composition, price, location, reorderPoint
       } = req.body;
 
@@ -471,12 +471,13 @@ app.post("/medicine/register",
         dosage: dosage || "",
         composition: composition || "",
         price: price || 0,
-        location: location || "",
+        location: manufacturerLocation || location || "",
         reorderPoint: reorderPoint || Math.floor(units * 0.2), // Default 20% of total
         ownerHistory: [
           { 
             owner: req.user.email, 
             role: req.user.role,
+            ownerLocation: manufacturerLocation || location || "",
             action: "REGISTERED",
             unitsPurchased: 0
           }
@@ -511,7 +512,7 @@ app.post("/medicine/transfer/:batchID",
   async (req, res) => {
     try {
       const batchID = req.params.batchID;
-      const { newOwnerEmail, newOwnerRole, unitsToTransfer } = req.body;
+      const { newOwnerEmail, newOwnerRole, unitsToTransfer, fromLocation, toLocation } = req.body;
 
       console.log("🔄 Transfer request:");
       console.log("  BatchID:", batchID);
@@ -519,6 +520,8 @@ app.post("/medicine/transfer/:batchID",
       console.log("  New owner email:", newOwnerEmail);
       console.log("  New owner role:", newOwnerRole);
       console.log("  Units to transfer:", unitsToTransfer);
+      console.log("  Transfer from location:", fromLocation || "N/A");
+      console.log("  Transfer to location:", toLocation || "N/A");
 
       // Validate input
       if (!newOwnerEmail || !newOwnerRole || !unitsToTransfer) {
@@ -620,10 +623,17 @@ app.post("/medicine/transfer/:batchID",
       med.ownerHistory.push({
         owner: newOwnerEmail,
         role: newOwnerRole || "UNKNOWN",
+        ownerLocation: toLocation || "",
         action: "TRANSFERRED",
         unitsPurchased: units,
-        from: req.user.email
+        from: req.user.email,
+        fromLocation: fromLocation || med.location || ""
       });
+
+      // Keep latest known stock location on the batch.
+      if (toLocation) {
+        med.location = toLocation;
+      }
 
       await med.save();
 

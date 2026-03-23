@@ -144,6 +144,7 @@ export const medicineAPI = {
     batchID: string;
     name: string;
     manufacturer: string;
+    manufacturerLocation?: string;
     mfgDate: string;
     expDate: string;
     totalUnits: number;
@@ -162,6 +163,8 @@ export const medicineAPI = {
     newOwnerEmail: string;
     newOwnerRole: string;
     unitsToTransfer: number;
+    fromLocation?: string;
+    toLocation?: string;
   }) => {
     return fetchAPI(`/medicine/transfer/${batchID}`, {
       method: 'POST',

@@ -12,6 +12,7 @@ export function RegisterMedicine({ onRegister }: RegisterMedicineProps) {
     batchID: '',
     name: '',
     manufacturer: '',
+    location: '',
     mfgDate: '',
     expDate: '',
     totalUnits: 0,
@@ -65,7 +66,7 @@ export function RegisterMedicine({ onRegister }: RegisterMedicineProps) {
       toast.success('Medicine registered successfully');
       setForm({
         batchID: '', name: '', manufacturer: '', mfgDate: '', expDate: '', totalUnits: 0,
-        category: 'Other', price: 0, dosage: '', composition: '', description: ''
+        category: 'Other', price: 0, dosage: '', composition: '', description: '', location: ''
       });
     } else if (result && !result.success) {
       toast.error(result.error || 'Registration failed');
@@ -97,7 +98,7 @@ export function RegisterMedicine({ onRegister }: RegisterMedicineProps) {
 
           <div className="space-y-2">
             <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 ml-1">Category</label>
-            <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}
+            <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} title="Medicine Category"
               className="w-full px-4 py-3 rounded-xl bg-gray-50 dark:bg-gray-700 border-transparent focus:bg-white dark:focus:bg-gray-600 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 transition-all appearance-none text-gray-900 dark:text-gray-100">
               <option value="">Select Category</option>
               <option value="Antibiotic">Antibiotic</option>
@@ -115,6 +116,18 @@ export function RegisterMedicine({ onRegister }: RegisterMedicineProps) {
             <input required type="text" value={form.manufacturer} onChange={e => setForm({ ...form, manufacturer: e.target.value })}
               placeholder="Company Name"
               className="w-full px-4 py-3 rounded-xl bg-gray-50 dark:bg-gray-700 border-transparent focus:bg-white dark:focus:bg-gray-600 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 transition-all text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500" />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 ml-1">Factory Location</label>
+            <input
+              required
+              type="text"
+              value={form.location || ''}
+              onChange={e => setForm({ ...form, location: e.target.value })}
+              placeholder="e.g. Hyderabad Plant 2"
+              className="w-full px-4 py-3 rounded-xl bg-gray-50 dark:bg-gray-700 border-transparent focus:bg-white dark:focus:bg-gray-600 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 transition-all text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+            />
           </div>
 
           <div className="space-y-2">
@@ -147,13 +160,13 @@ export function RegisterMedicine({ onRegister }: RegisterMedicineProps) {
 
           <div className="space-y-2">
             <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 ml-1">Manufacturing Date</label>
-            <input required type="date" value={form.mfgDate} onChange={e => setForm({ ...form, mfgDate: e.target.value })}
+            <input required type="date" title="Manufacturing Date" value={form.mfgDate} onChange={e => setForm({ ...form, mfgDate: e.target.value })}
               className="w-full px-4 py-3 rounded-xl bg-gray-50 dark:bg-gray-700 border-transparent focus:bg-white dark:focus:bg-gray-600 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 transition-all text-gray-900 dark:text-gray-100" />
           </div>
 
           <div className="space-y-2">
             <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 ml-1">Expiry Date</label>
-            <input required type="date" value={form.expDate} onChange={e => setForm({ ...form, expDate: e.target.value })}
+            <input required type="date" title="Expiry Date" value={form.expDate} onChange={e => setForm({ ...form, expDate: e.target.value })}
               className="w-full px-4 py-3 rounded-xl bg-gray-50 dark:bg-gray-700 border-transparent focus:bg-white dark:focus:bg-gray-600 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 transition-all text-gray-900 dark:text-gray-100" />
           </div>
 
@@ -172,7 +185,7 @@ export function RegisterMedicine({ onRegister }: RegisterMedicineProps) {
         </div>
 
         <div className="mt-8 flex items-center justify-end gap-4">
-          <button type="button" onClick={() => setForm({ batchID: '', name: '', manufacturer: '', mfgDate: '', expDate: '', totalUnits: 0, category: 'Other', price: 0, dosage: '', composition: '', description: '' })}
+          <button type="button" onClick={() => setForm({ batchID: '', name: '', manufacturer: '', location: '', mfgDate: '', expDate: '', totalUnits: 0, category: 'Other', price: 0, dosage: '', composition: '', description: '' })}
             className="px-6 py-3 rounded-xl text-gray-500 dark:text-gray-400 font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
             Clear Form
           </button>

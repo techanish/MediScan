@@ -15,7 +15,14 @@ import {
 interface TransferOwnershipProps {
   medicines: Medicine[];
   getToken: () => Promise<string | null>;
-  onTransfer: (batchID: string, newOwnerEmail: string, newOwnerRole: string, unitsToTransfer: number) => Promise<{ success: boolean; error?: string }>;
+  onTransfer: (
+    batchID: string,
+    newOwnerEmail: string,
+    newOwnerRole: string,
+    unitsToTransfer: number,
+    fromLocation?: string,
+    toLocation?: string
+  ) => Promise<{ success: boolean; error?: string }>;
   userEmail?: string;
 }
 
@@ -54,6 +61,8 @@ export function TransferOwnership({ medicines, getToken, onTransfer, userEmail }
   const [selectedBatch, setSelectedBatch] = useState('');
   const [selectedCompanyEmail, setSelectedCompanyEmail] = useState('');
   const [quantity, setQuantity] = useState('');
+  const [fromLocation, setFromLocation] = useState('');
+  const [toLocation, setToLocation] = useState('');
   const [companies, setCompanies] = useState<Company[]>([]);
   const [isLoadingCompanies, setIsLoadingCompanies] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
@@ -95,8 +104,20 @@ export function TransferOwnership({ medicines, getToken, onTransfer, userEmail }
       return;
     }
 
+    if (!toLocation.trim()) {
+      toast.error('Please enter destination location');
+      return;
+    }
+
     setIsLoading(true);
-    const result = await onTransfer(selectedBatch, selectedCompany.email, selectedCompany.role, qty);
+    const result = await onTransfer(
+      selectedBatch,
+      selectedCompany.email,
+      selectedCompany.role,
+      qty,
+      fromLocation.trim() || selectedMedicine.location || '',
+      toLocation.trim()
+    );
     setIsLoading(false);
 
     if (result.success) {
@@ -104,6 +125,8 @@ export function TransferOwnership({ medicines, getToken, onTransfer, userEmail }
       setSelectedBatch('');
       setSelectedCompanyEmail('');
       setQuantity('');
+      setFromLocation('');
+      setToLocation('');
     } else {
       toast.error(result.error || 'Transfer failed');
     }
@@ -187,6 +210,28 @@ export function TransferOwnership({ medicines, getToken, onTransfer, userEmail }
                     Max available: {getAvailableUnits(selectedMedicine, userEmail)}
                   </p>
                 )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Source Location</label>
+                <input
+                  type="text"
+                  value={fromLocation}
+                  onChange={(e) => setFromLocation(e.target.value)}
+                  placeholder={selectedMedicine?.location || 'e.g. Hyderabad Warehouse'}
+                  className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Destination Location</label>
+                <input
+                  type="text"
+                  value={toLocation}
+                  onChange={(e) => setToLocation(e.target.value)}
+                  placeholder="e.g. Bengaluru DC-1"
+                  className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+                />
               </div>
 
               <button

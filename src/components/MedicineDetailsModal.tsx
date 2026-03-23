@@ -47,6 +47,7 @@ export function MedicineDetailsModal({ medicine, onClose }: MedicineDetailsModal
             </div>
             <button
               onClick={onClose}
+              title="Close"
               className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors"
             >
               <X className="w-6 h-6" />
@@ -167,6 +168,13 @@ export function MedicineDetailsModal({ medicine, onClose }: MedicineDetailsModal
                         <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5 truncate w-full" title={h.owner}>
                           {h.owner}
                         </p>
+                        {(h.ownerLocation || h.fromLocation) && (
+                          <p className="text-xs text-gray-500 dark:text-gray-500 mt-0.5 truncate w-full" title={h.action === 'TRANSFERRED' ? `${h.fromLocation || 'Unknown'} -> ${h.ownerLocation || 'Unknown'}` : (h.ownerLocation || h.fromLocation)}>
+                            {h.action === 'TRANSFERRED'
+                              ? `${h.fromLocation || 'Unknown'} -> ${h.ownerLocation || 'Unknown'}`
+                              : (h.ownerLocation || h.fromLocation)}
+                          </p>
+                        )}
                       </div>
                     ))}
                   </div>
