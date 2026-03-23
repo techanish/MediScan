@@ -10,6 +10,8 @@ import {
   Bell,
   X,
   Users,
+  Cpu,
+  BarChart3,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { User } from '../App';
@@ -33,6 +35,8 @@ export function Sidebar({ user, activeTab, setActiveTab, isOpen, setIsOpen, onLo
     { id: 'sales', label: 'Process Sale', icon: ShoppingCart, roles: ['PHARMACY', 'DISTRIBUTOR'] },
     { id: 'qrcode', label: 'QR Generator', icon: QrCode, roles: ['ALL'] },
     { id: 'verify', label: 'Verify Medicine', icon: ShieldCheck, roles: ['ALL'] },
+    { id: 'blockchain', label: 'Blockchain Explorer', icon: Cpu, roles: ['ALL'] },
+    { id: 'analytics', label: 'Analytics', icon: BarChart3, roles: ['ALL'] },
     { id: 'notifications', label: 'Notifications', icon: Bell, roles: ['ALL'] },
     { id: 'admin', label: 'Administration', icon: Users, roles: ['ADMIN', 'MANUFACTURER'] },
     { id: 'profile', label: 'Profile', icon: Settings, roles: ['ALL'] },

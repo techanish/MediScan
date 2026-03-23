@@ -6,9 +6,12 @@ interface HeaderProps {
   onMenuClick: () => void;
   notificationCount: number;
   onNotificationClick: () => void;
+  searchValue?: string;
+  onSearchChange?: (val: string) => void;
+  onSearchSubmit?: () => void;
 }
 
-export function Header({ title, onMenuClick, notificationCount, onNotificationClick }: HeaderProps) {
+export function Header({ title, onMenuClick, notificationCount, onNotificationClick, searchValue = '', onSearchChange, onSearchSubmit }: HeaderProps) {
   const { theme, setTheme } = useTheme();
 
   return (
@@ -21,14 +24,17 @@ export function Header({ title, onMenuClick, notificationCount, onNotificationCl
       </div>
 
       <div className="flex items-center gap-4">
-        <div className="hidden md:flex items-center gap-2 px-4 py-2 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 focus-within:ring-2 focus-within:ring-emerald-100 dark:focus-within:ring-emerald-900 transition-all">
-          <Search className="w-4 h-4 text-gray-400" />
+        <form onSubmit={e => { e.preventDefault(); onSearchSubmit?.(); }}
+          className="hidden md:flex items-center gap-2 px-4 py-2 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 focus-within:ring-2 focus-within:ring-emerald-100 dark:focus-within:ring-emerald-900 transition-all">
+          <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
           <input
             type="text"
-            placeholder="Search..."
-            className="bg-transparent border-none focus:outline-none text-sm w-48 text-gray-600 dark:text-gray-300 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+            value={searchValue}
+            onChange={e => onSearchChange?.(e.target.value)}
+            placeholder="Search inventory..."
+            className="bg-transparent border-none focus:outline-none text-sm w-44 text-gray-600 dark:text-gray-300 placeholder:text-gray-400 dark:placeholder:text-gray-500"
           />
-        </div>
+        </form>
         <button
           onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
           className="p-2 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl transition-colors"
@@ -48,3 +54,4 @@ export function Header({ title, onMenuClick, notificationCount, onNotificationCl
     </header>
   );
 }
+

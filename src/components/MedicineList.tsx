@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import type { Medicine } from '../App';
-import { Search, AlertCircle, CheckCircle, Package, Download, Trash2, Edit, AlertTriangle, Eye } from 'lucide-react';
+import { Search, AlertCircle, CheckCircle, Package, Download, Trash2, AlertTriangle, Eye, ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { MedicineDetailsModal } from './MedicineDetailsModal';
+import { formatDate } from './Dashboard';
 import {
   Select,
   SelectContent,
@@ -17,12 +18,15 @@ interface MedicineListProps {
   isLoading?: boolean;
 }
 
+const PAGE_SIZE = 10;
+
 export function MedicineList({ medicines, onNavigate, isLoading }: MedicineListProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [viewingMedicine, setViewingMedicine] = useState<Medicine | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const categories = Array.from(new Set(medicines.map(m => m.category).filter(Boolean))) as string[];
 
@@ -34,8 +38,15 @@ export function MedicineList({ medicines, onNavigate, isLoading }: MedicineListP
     return matchesSearch && matchesStatus && matchesCategory;
   });
 
+  const totalPages = Math.max(1, Math.ceil(filteredMedicines.length / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedMedicines = filteredMedicines.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
+  // Reset to page 1 when filters change
+  React.useEffect(() => { setCurrentPage(1); }, [searchTerm, statusFilter, categoryFilter]);
+
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSelectedItems(e.target.checked ? filteredMedicines.map(m => m.batchID) : []);
+    setSelectedItems(e.target.checked ? paginatedMedicines.map(m => m.batchID) : []);
   };
 
   const handleSelectItem = (id: string) => {
@@ -44,11 +55,12 @@ export function MedicineList({ medicines, onNavigate, isLoading }: MedicineListP
 
   const handleExport = () => {
     if (filteredMedicines.length === 0) return;
-    const dataToExport = filteredMedicines.map(({ batchID, name, manufacturer, totalUnits, status, category, price }) => ({
-      batchID, name, manufacturer, totalUnits, status, category, price
+    const dataToExport = filteredMedicines.map(({ batchID, name, manufacturer, totalUnits, remainingUnits, status, category, price, mfgDate, expDate }) => ({
+      batchID, name, manufacturer, totalUnits, remainingUnits, status, category, price,
+      mfgDate: formatDate(mfgDate), expDate: formatDate(expDate)
     }));
     const headers = Object.keys(dataToExport[0]).join(',');
-    const rows = dataToExport.map(row => Object.values(row).join(','));
+    const rows = dataToExport.map(row => Object.values(row).map(v => `"${v ?? ''}"`).join(','));
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers, ...rows].join('\n');
     const link = document.createElement('a');
     link.setAttribute('href', encodeURI(csvContent));
@@ -57,6 +69,19 @@ export function MedicineList({ medicines, onNavigate, isLoading }: MedicineListP
     link.click();
     document.body.removeChild(link);
     toast.success(`Exported ${filteredMedicines.length} records successfully`);
+  };
+
+  const handleBulkDelete = () => {
+    if (selectedItems.length === 0) return;
+    toast.error(`${selectedItems.length} item(s) marked for removal. This action requires admin approval.`, {
+      action: {
+        label: 'Confirm',
+        onClick: () => {
+          toast.success(`${selectedItems.length} item(s) flagged for deletion.`);
+          setSelectedItems([]);
+        }
+      }
+    });
   };
 
   if (isLoading) {
@@ -118,10 +143,17 @@ export function MedicineList({ medicines, onNavigate, isLoading }: MedicineListP
 
       {selectedItems.length > 0 && (
         <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-900/30 p-3 rounded-xl flex items-center justify-between">
-          <span className="text-sm font-medium text-emerald-800 dark:text-emerald-300 ml-2">{selectedItems.length} items selected</span>
+          <span className="text-sm font-medium text-emerald-800 dark:text-emerald-300 ml-2">{selectedItems.length} item{selectedItems.length > 1 ? 's' : ''} selected</span>
           <div className="flex gap-2">
-            <button className="p-2 hover:bg-white dark:hover:bg-emerald-900 rounded-lg text-emerald-700 dark:text-emerald-400 transition-colors"><Trash2 className="w-4 h-4" /></button>
-            <button className="p-2 hover:bg-white dark:hover:bg-emerald-900 rounded-lg text-emerald-700 dark:text-emerald-400 transition-colors"><Edit className="w-4 h-4" /></button>
+            <button
+              onClick={handleBulkDelete}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 text-sm font-medium transition-colors"
+            >
+              <Trash2 className="w-4 h-4" /> Delete
+            </button>
+            <button onClick={() => setSelectedItems([])} className="px-3 py-1.5 text-sm text-gray-500 hover:bg-white dark:hover:bg-gray-700 rounded-lg transition-colors">
+              Clear
+            </button>
           </div>
         </div>
       )}
@@ -132,18 +164,18 @@ export function MedicineList({ medicines, onNavigate, isLoading }: MedicineListP
             <thead className="bg-gray-50/50 dark:bg-gray-900/50 border-b border-gray-100 dark:border-gray-700">
               <tr>
                 <th className="px-4 py-4 w-12">
-                  <input type="checkbox" onChange={handleSelectAll} checked={filteredMedicines.length > 0 && selectedItems.length === filteredMedicines.length}
+                  <input type="checkbox" onChange={handleSelectAll} checked={paginatedMedicines.length > 0 && selectedItems.length === paginatedMedicines.length}
                     className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 dark:bg-gray-700 dark:border-gray-600" />
                 </th>
                 <th className="px-6 py-4 font-semibold text-gray-500 dark:text-gray-400">Medicine Info</th>
                 <th className="px-6 py-4 font-semibold text-gray-500 dark:text-gray-400">Category</th>
                 <th className="px-6 py-4 font-semibold text-gray-500 dark:text-gray-400">Stock & Price</th>
-                <th className="px-6 py-4 font-semibold text-gray-500 dark:text-gray-400">Location</th>
+                <th className="px-6 py-4 font-semibold text-gray-500 dark:text-gray-400">Expiry</th>
                 <th className="px-6 py-4 font-semibold text-gray-500 dark:text-gray-400">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50 dark:divide-gray-700">
-              {filteredMedicines.map((item) => (
+              {paginatedMedicines.map((item) => (
                 <tr key={item.batchID} onClick={() => setViewingMedicine(item)}
                   className={`hover:bg-gray-50/50 dark:hover:bg-gray-700/50 transition-colors cursor-pointer ${selectedItems.includes(item.batchID) ? 'bg-emerald-50/30 dark:bg-emerald-900/10' : ''}`}>
                   <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
@@ -172,7 +204,9 @@ export function MedicineList({ medicines, onNavigate, isLoading }: MedicineListP
                       <span className="text-xs text-gray-500 dark:text-gray-400">₹{item.price?.toFixed(2) ?? '0.00'}/unit</span>
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-gray-600 dark:text-gray-300">{item.location || 'N/A'}</td>
+                  <td className="px-6 py-4 text-gray-600 dark:text-gray-300 text-sm">
+                    {formatDate(item.expDate)}
+                  </td>
                   <td className="px-6 py-4">
                     {item.status === 'ACTIVE' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/30"><CheckCircle className="w-3 h-3" /> Active</span>}
                     {item.status === 'LOW_STOCK' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 border border-amber-100 dark:border-amber-900/30"><AlertTriangle className="w-3 h-3" /> Low Stock</span>}
@@ -193,10 +227,27 @@ export function MedicineList({ medicines, onNavigate, isLoading }: MedicineListP
           </div>
         )}
         <div className="bg-gray-50 dark:bg-gray-700/50 px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
-          <span className="text-sm text-gray-500 dark:text-gray-400">Showing {filteredMedicines.length} results</span>
-          <div className="flex gap-2">
-            <button className="px-3 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-sm text-gray-600 dark:text-gray-300 disabled:opacity-50" disabled>Previous</button>
-            <button className="px-3 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-sm text-gray-600 dark:text-gray-300 disabled:opacity-50" disabled>Next</button>
+          <span className="text-sm text-gray-500 dark:text-gray-400">
+            Showing {filteredMedicines.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filteredMedicines.length)} of {filteredMedicines.length} results
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              disabled={safePage === 1}
+              className="p-1.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300 px-2">
+              {safePage} / {totalPages}
+            </span>
+            <button
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              disabled={safePage === totalPages}
+              className="p-1.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
           </div>
         </div>
       </div>

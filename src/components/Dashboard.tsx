@@ -1,7 +1,7 @@
 import React from 'react';
 import type { Medicine, User } from '../App';
 import { StatDetailsModal } from './StatDetailsModal';
-import { Package, Truck, AlertTriangle, TrendingUp, Activity, CheckCircle, ShieldCheck, IndianRupee, PieChart as PieChartIcon, BarChart3 } from 'lucide-react';
+import { Package, Truck, AlertTriangle, TrendingUp, TrendingDown, Activity, CheckCircle, ShieldCheck, IndianRupee, PieChart as PieChartIcon, BarChart3, Clock } from 'lucide-react';
 import { motion } from 'framer-motion';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -21,14 +21,37 @@ const fadeUp = (delay = 0) => ({
   transition: { delay, duration: 0.35, ease: 'easeOut' as const },
 });
 
+export function formatDate(dateStr: string | undefined): string {
+  if (!dateStr) return '—';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr;
+  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
 export function Dashboard({ medicines, user }: DashboardProps) {
   const [selectedStat, setSelectedStat] = React.useState<'value' | 'units' | 'alerts' | 'batches' | null>(null);
 
   const activeBatches = medicines.filter(m => m.status === 'ACTIVE' || m.status === 'LOW_STOCK').length;
   const totalUnits = medicines.reduce((acc, m) => acc + (m.remainingUnits || 0), 0);
+  const totalCapacity = medicines.reduce((acc, m) => acc + (m.totalUnits || 0), 0);
   const totalValue = medicines.reduce((acc, m) => acc + ((m.remainingUnits || 0) * (m.price || 0)), 0);
   const expiredCount = medicines.filter(m => m.status === 'EXPIRED').length;
   const lowStockCount = medicines.filter(m => m.status === 'LOW_STOCK').length;
+
+  // Real trend metrics
+  const utilizationPct = totalCapacity > 0 ? Math.round((totalUnits / totalCapacity) * 100) : 0;
+  const alertRate = medicines.length > 0 ? Math.round(((expiredCount + lowStockCount) / medicines.length) * 100) : 0;
+  const activeRate = medicines.length > 0 ? Math.round((activeBatches / medicines.length) * 100) : 0;
+  const avgPrice = medicines.length > 0 ? (medicines.reduce((a, m) => a + (m.price || 0), 0) / medicines.length) : 0;
+
+  // Expiry alerts: expiring within 30 days
+  const now = new Date();
+  const in30Days = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+  const expiringSoon = medicines.filter(m => {
+    if (!m.expDate || m.status === 'EXPIRED') return false;
+    const exp = new Date(m.expDate);
+    return exp >= now && exp <= in30Days;
+  });
 
   const recentActivity = medicines
     .flatMap(m => m.ownerHistory.map(h => ({ ...h, medicineName: m.name, batchID: m.batchID })))
@@ -53,10 +76,10 @@ export function Dashboard({ medicines, user }: DashboardProps) {
     }));
 
   const stats = [
-    { id: 'value', label: 'Total Value', value: `₹${totalValue.toLocaleString()}`, sub: 'Estimated Asset Value', icon: IndianRupee, color: 'text-emerald-600', bg: 'bg-emerald-100 dark:bg-emerald-900/20' },
-    { id: 'units', label: 'Total Units', value: totalUnits.toLocaleString(), sub: 'Available Stock', icon: Activity, color: 'text-blue-600', bg: 'bg-blue-100 dark:bg-blue-900/20' },
-    { id: 'alerts', label: 'Alerts', value: expiredCount + lowStockCount, sub: `${lowStockCount} Low, ${expiredCount} Expired`, icon: AlertTriangle, color: 'text-amber-600', bg: 'bg-amber-100 dark:bg-amber-900/20' },
-    { id: 'batches', label: 'Active Batches', value: activeBatches, sub: 'In Circulation', icon: Package, color: 'text-purple-600', bg: 'bg-purple-100 dark:bg-purple-900/20' },
+    { id: 'value', label: 'Total Value', value: `₹${totalValue.toLocaleString()}`, sub: avgPrice > 0 ? `Avg ₹${avgPrice.toFixed(0)}/unit` : 'Set price when registering', icon: IndianRupee, color: 'text-emerald-600', bg: 'bg-emerald-100 dark:bg-emerald-900/20', trend: avgPrice > 0 ? { up: true, label: `₹${avgPrice.toFixed(0)} avg` } : null },
+    { id: 'units', label: 'Total Units', value: totalUnits.toLocaleString(), sub: `${utilizationPct}% utilization`, icon: Activity, color: 'text-blue-600', bg: 'bg-blue-100 dark:bg-blue-900/20', trend: { up: utilizationPct >= 50, label: `${utilizationPct}%` } },
+    { id: 'alerts', label: 'Alerts', value: expiredCount + lowStockCount, sub: `${lowStockCount} Low, ${expiredCount} Expired`, icon: AlertTriangle, color: 'text-amber-600', bg: 'bg-amber-100 dark:bg-amber-900/20', trend: alertRate > 0 ? { up: false, label: `${alertRate}% rate` } : { up: true, label: 'All clear' } },
+    { id: 'batches', label: 'Active Batches', value: activeBatches, sub: `${activeRate}% of inventory`, icon: Package, color: 'text-purple-600', bg: 'bg-purple-100 dark:bg-purple-900/20', trend: { up: activeRate >= 70, label: `${activeRate}%` } },
   ];
 
   const healthItems = [
@@ -72,8 +95,14 @@ export function Dashboard({ medicines, user }: DashboardProps) {
         <div className="max-w-3xl">
           <h2 className="text-3xl font-bold mb-2">Welcome back, {user.name}!</h2>
           <p className="text-emerald-100 text-lg opacity-90">
-            Overview of your pharmaceutical inventory. You have {activeBatches} active batches and value of ₹{totalValue.toLocaleString()}.
+            Overview of your pharmaceutical inventory. You have {activeBatches} active {activeBatches === 1 ? 'batch' : 'batches'}{totalValue > 0 ? ` with total value ₹${totalValue.toLocaleString()}` : ''}.
           </p>
+          {expiringSoon.length > 0 && (
+            <div className="mt-4 inline-flex items-center gap-2 bg-amber-400/20 border border-amber-300/30 rounded-xl px-4 py-2 text-sm font-semibold">
+              <Clock className="w-4 h-4" />
+              ⚠️ {expiringSoon.length} {expiringSoon.length === 1 ? 'batch expires' : 'batches expire'} within 30 days
+            </div>
+          )}
         </div>
       </motion.div>
 
@@ -119,14 +148,21 @@ export function Dashboard({ medicines, user }: DashboardProps) {
                   <stat.icon className={`w-6 h-6 ${stat.color}`} />
                 )}
               </motion.div>
-              <motion.span
-                initial={{ opacity: 0, x: 8 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.35 + i * 0.08 }}
-                className="flex items-center gap-1 text-xs font-medium text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/30 px-2 py-1 rounded-full"
-              >
-                <TrendingUp className="w-3 h-3" /> +2.5%
-              </motion.span>
+              {stat.trend && (
+                <motion.span
+                  initial={{ opacity: 0, x: 8 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.35 + i * 0.08 }}
+                  className={`flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full ${
+                    stat.trend.up
+                      ? 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/30'
+                      : 'text-red-500 dark:text-red-400 bg-red-50 dark:bg-red-900/30'
+                  }`}
+                >
+                  {stat.trend.up ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                  {stat.trend.label}
+                </motion.span>
+              )}
             </div>
             <div>
               <h3 className="text-2xl font-bold text-gray-900 dark:text-white">{stat.value}</h3>
@@ -250,7 +286,7 @@ export function Dashboard({ medicines, user }: DashboardProps) {
                   <div className="flex-1 py-1">
                     <div className="flex items-center justify-between mb-1">
                       <p className="text-sm font-bold text-gray-900 dark:text-white">{activity.medicineName}</p>
-                      <span className="text-xs text-gray-400">{activity.date || activity.time}</span>
+                      <span className="text-xs text-gray-400">{formatDate(activity.date || activity.time)}</span>
                     </div>
                     <p className="text-sm text-gray-600 dark:text-gray-300">
                       <span className="font-medium text-gray-800 dark:text-gray-200">{activity.action}</span> • {activity.batchID}

@@ -44,6 +44,11 @@ export function RegisterMedicine({ onRegister }: RegisterMedicineProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Date validation
+    if (form.mfgDate && form.expDate && new Date(form.mfgDate) >= new Date(form.expDate)) {
+      toast.error('Manufacturing date must be before expiry date');
+      return;
+    }
     setIsLoading(true);
     const result = await onRegister({
       ...form,
@@ -94,11 +99,13 @@ export function RegisterMedicine({ onRegister }: RegisterMedicineProps) {
             <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 ml-1">Category</label>
             <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}
               className="w-full px-4 py-3 rounded-xl bg-gray-50 dark:bg-gray-700 border-transparent focus:bg-white dark:focus:bg-gray-600 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 transition-all appearance-none text-gray-900 dark:text-gray-100">
-              <option value="Other">Select Category</option>
+              <option value="">Select Category</option>
               <option value="Antibiotic">Antibiotic</option>
               <option value="Painkiller">Painkiller</option>
               <option value="Vitamin">Vitamin</option>
               <option value="Cardiovascular">Cardiovascular</option>
+              <option value="Antidiabetic">Antidiabetic</option>
+              <option value="Antiviral">Antiviral</option>
               <option value="Other">Other</option>
             </select>
           </div>

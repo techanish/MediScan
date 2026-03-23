@@ -16,6 +16,8 @@ import { AdminPanel } from './components/AdminPanel';
 import { Profile } from './components/Profile';
 import { Notifications } from './components/Notifications';
 import type { Notification } from './components/Notifications';
+import { Analytics } from './components/Analytics';
+import { BlockchainExplorer } from './components/BlockchainExplorer';
 import { medicineAPI, blockchainAPI, authAPI } from './utils/api';
 
 export interface User {
@@ -85,6 +87,7 @@ function MediScanApp() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [headerSearch, setHeaderSearch] = useState('');
 
   useEffect(() => {
     if (isLoaded && clerkUser) {
@@ -174,7 +177,13 @@ function MediScanApp() {
         mfgDate: medicine.mfgDate!,
         expDate: medicine.expDate!,
         totalUnits: medicine.totalUnits!,
-      });
+        category: medicine.category,
+        price: medicine.price,
+        dosage: medicine.dosage,
+        composition: medicine.composition,
+        description: medicine.description,
+        location: medicine.location,
+      } as any);
       if (response.success) {
         blockchainAPI.addBlock(token, {
           action: 'REGISTER', batchID: medicine.batchID, name: medicine.name,
@@ -314,6 +323,10 @@ function MediScanApp() {
         return <Profile user={user} onUpdate={handleUpdateProfile} />;
       case 'notifications':
         return <Notifications notifications={notifications} onMarkAllRead={handleMarkAllRead} onRead={handleReadNotification} />;
+      case 'blockchain':
+        return <BlockchainExplorer medicines={medicines} />;
+      case 'analytics':
+        return <Analytics user={user} medicines={medicines} />;
       default:
         return <Dashboard medicines={medicines} user={user} />;
     }
@@ -331,6 +344,8 @@ function MediScanApp() {
       notifications: 'Notifications',
       admin: 'System Administration',
       profile: 'Account Settings',
+      blockchain: 'Blockchain Explorer',
+      analytics: 'Analytics',
     };
     return titles[activeTab] || 'Dashboard';
   };
@@ -365,6 +380,9 @@ function MediScanApp() {
           onMenuClick={() => setIsSidebarOpen(true)}
           notificationCount={notifications.filter(n => !n.read).length}
           onNotificationClick={() => setActiveTab('notifications')}
+          searchValue={headerSearch}
+          onSearchChange={setHeaderSearch}
+          onSearchSubmit={() => { if (headerSearch.trim()) { setActiveTab('inventory'); } }}
         />
 
         <main className="flex-1 overflow-y-auto p-4 lg:p-8">

@@ -22,9 +22,18 @@ export function ProcessSale({ medicines, user, onSale }: ProcessSaleProps) {
   const [customerEmail, setCustomerEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const myMedicines = medicines.filter(m =>
-    m.currentOwner?.toLowerCase() === user.email.toLowerCase() && (m.remainingUnits || 0) > 0
-  );
+  // Mirror the backend logic: show medicines where user has available units
+  const myMedicines = medicines.filter(m => {
+    const userEmail = user.email.toLowerCase();
+    let received = 0, out = 0, sold = 0;
+    (m.ownerHistory || []).forEach(h => {
+      if (h.action === 'REGISTERED' && h.owner?.toLowerCase() === userEmail) received += m.totalUnits || 0;
+      if (h.action === 'TRANSFERRED' && h.owner?.toLowerCase() === userEmail) received += h.unitsPurchased || 0;
+      if (h.action === 'TRANSFERRED' && h.from?.toLowerCase() === userEmail) out += h.unitsPurchased || 0;
+      if (h.action === 'PURCHASED' && h.from?.toLowerCase() === userEmail) sold += h.unitsPurchased || 0;
+    });
+    return (received - out - sold) > 0;
+  });
   const selectedMedicine = myMedicines.find(m => m.batchID === selectedBatch);
 
   const handleSubmit = async (e: React.FormEvent) => {
