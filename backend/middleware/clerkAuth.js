@@ -1,4 +1,60 @@
 const { clerkClient } = require("@clerk/clerk-sdk-node");
+const LoginSession = require("../models/LoginSession");
+
+function getClientIp(req) {
+  const forwarded = req.headers["x-forwarded-for"];
+  if (typeof forwarded === "string" && forwarded.length > 0) {
+    return forwarded.split(",")[0].trim();
+  }
+  return req.socket?.remoteAddress || req.ip || "UNKNOWN";
+}
+
+async function trackSession(req, user, tokenPayload) {
+  try {
+    const sessionId = tokenPayload.sid || tokenPayload.session_id || "";
+    const tokenId = tokenPayload.jti || "";
+    const key = sessionId || tokenId;
+    if (!key) return;
+
+    const now = new Date();
+    const filter = sessionId ? { userId: user.id, sessionId } : { userId: user.id, tokenId };
+    const existing = await LoginSession.findOne(filter).select("lastSeenAt");
+
+    // Throttle writes to reduce database churn for high-frequency API usage.
+    if (existing && now.getTime() - new Date(existing.lastSeenAt).getTime() < 30 * 1000) {
+      return;
+    }
+
+    await LoginSession.findOneAndUpdate(
+      filter,
+      {
+        $setOnInsert: {
+          userId: user.id,
+          email: user.email,
+          role: user.role,
+          sessionId,
+          tokenId,
+          ipAddress: getClientIp(req),
+          userAgent: req.get("user-agent") || "UNKNOWN",
+          firstSeenAt: now,
+        },
+        $set: {
+          email: user.email,
+          role: user.role,
+          ipAddress: getClientIp(req),
+          userAgent: req.get("user-agent") || "UNKNOWN",
+          lastSeenAt: now,
+          lastPath: req.originalUrl || req.path || "",
+          isActive: true,
+        }
+      },
+      { upsert: true, new: true }
+    );
+  } catch (sessionErr) {
+    // Do not block request flow due to telemetry/session tracking issues.
+    console.error("Session tracking error:", sessionErr.message);
+  }
+}
 
 /**
  * Clerk Authentication Middleware
@@ -61,6 +117,22 @@ async function clerkAuth(req, res, next) {
       role: user.publicMetadata?.role || "CUSTOMER", // Role stored in Clerk user metadata
       companyName: user.publicMetadata?.companyName || ""
     };
+
+    if (user.publicMetadata?.isBanned) {
+      return res.status(403).json({
+        error: "Account is banned",
+        message: "Please contact the administrator"
+      });
+    }
+
+    req.auth = {
+      sessionId: tokenPayload.sid || tokenPayload.session_id || "",
+      tokenId: tokenPayload.jti || "",
+      issuedAt: tokenPayload.iat,
+      expiresAt: tokenPayload.exp,
+    };
+
+    await trackSession(req, req.user, tokenPayload);
 
     next();
   } catch (err) {

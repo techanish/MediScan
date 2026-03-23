@@ -12,12 +12,13 @@ import { VerifyMedicine } from './components/VerifyMedicine';
 import { TransferOwnership } from './components/TransferOwnership';
 import { ProcessSale } from './components/ProcessSale';
 import { QrCodeGenerator } from './components/QrCodeGenerator';
-import { AdminPanel } from './components/AdminPanel';
+import { AdminManagementPanel } from './components/AdminManagementPanel';
 import { Profile } from './components/Profile';
 import { Notifications } from './components/Notifications';
 import type { Notification } from './components/Notifications';
 import { Analytics } from './components/Analytics';
 import { BlockchainExplorer } from './components/BlockchainExplorer';
+import { Tickets } from './components/Tickets';
 import { medicineAPI, blockchainAPI, authAPI } from './utils/api';
 
 export interface User {
@@ -25,6 +26,7 @@ export interface User {
   email: string;
   role: 'MANUFACTURER' | 'DISTRIBUTOR' | 'PHARMACY' | 'CUSTOMER' | 'ADMIN';
   companyName?: string;
+  hasCompanyNameSet?: boolean;
   token: string;
 }
 
@@ -66,6 +68,7 @@ export interface Medicine {
 }
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const APP_SYNC_FALLBACK_INTERVAL_MS = 30000;
 
 function mapNotificationType(type: string, priority: string): 'ALERT' | 'INFO' | 'SUCCESS' | 'WARNING' {
   if (type === 'EXPIRY_ALERT' || type === 'LOW_STOCK') return 'WARNING';
@@ -104,6 +107,9 @@ function MediScanApp() {
     if (isLoaded && clerkUser) {
       const role = (clerkUser.publicMetadata?.role as string) || 'CUSTOMER';
       const companyName = (clerkUser.publicMetadata?.companyName as string) || '';
+      const hasCompanyNameSet = Boolean(
+        clerkUser.publicMetadata?.hasCompanyNameSet || companyName.trim() !== ''
+      );
       const primaryEmail = clerkUser.primaryEmailAddress?.emailAddress;
       if (!primaryEmail) return;
       setUser({
@@ -111,6 +117,7 @@ function MediScanApp() {
         email: primaryEmail,
         role: role as User['role'],
         companyName,
+        hasCompanyNameSet,
         token: '',
       });
     } else if (isLoaded && !clerkUser) {
@@ -119,9 +126,11 @@ function MediScanApp() {
     }
   }, [clerkUser, isLoaded]);
 
-  const loadMedicines = useCallback(async () => {
+  const loadMedicines = useCallback(async (options?: { silent?: boolean }) => {
     if (!user) return;
-    setIsLoadingMedicines(true);
+    if (!options?.silent) {
+      setIsLoadingMedicines(true);
+    }
     try {
       const token = await getToken();
       if (!token) return;
@@ -133,13 +142,21 @@ function MediScanApp() {
     } catch (error) {
       console.error('Failed to load medicines:', error);
     } finally {
-      setIsLoadingMedicines(false);
+      if (!options?.silent) {
+        setIsLoadingMedicines(false);
+      }
     }
   }, [user, getToken]);
 
   useEffect(() => {
     loadMedicines();
   }, [loadMedicines]);
+
+  useEffect(() => {
+    if (user?.role === 'ADMIN' && activeTab === 'dashboard') {
+      setActiveTab('admin');
+    }
+  }, [user, activeTab]);
 
   const loadNotifications = useCallback(async () => {
     try {
@@ -169,6 +186,100 @@ function MediScanApp() {
   useEffect(() => {
     if (user) loadNotifications();
   }, [user, loadNotifications]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    let syncInFlight = false;
+
+    const runSync = async () => {
+      if (syncInFlight) return;
+      syncInFlight = true;
+      try {
+        await Promise.all([
+          loadMedicines({ silent: true }),
+          loadNotifications(),
+        ]);
+      } finally {
+        syncInFlight = false;
+      }
+    };
+
+    const intervalId = window.setInterval(runSync, APP_SYNC_FALLBACK_INTERVAL_MS);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        runSync();
+      }
+    };
+
+    const handleWindowFocus = () => {
+      runSync();
+    };
+
+    const handleRealtimeUpdate = () => {
+      runSync();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleWindowFocus);
+    window.addEventListener('mediscan:realtime-update', handleRealtimeUpdate);
+
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleWindowFocus);
+      window.removeEventListener('mediscan:realtime-update', handleRealtimeUpdate);
+    };
+  }, [user, loadMedicines, loadNotifications]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    let source: EventSource | null = null;
+    let reconnectTimer: number | null = null;
+    let stopped = false;
+
+    const connect = async () => {
+      try {
+        const token = await getToken();
+        if (!token || stopped) return;
+
+        source = new EventSource(`${API_URL}/events/stream?token=${encodeURIComponent(token)}`);
+
+        source.addEventListener('app-update', () => {
+          window.dispatchEvent(new Event('mediscan:realtime-update'));
+        });
+
+        source.onerror = () => {
+          source?.close();
+          if (!stopped && reconnectTimer === null) {
+            reconnectTimer = window.setTimeout(() => {
+              reconnectTimer = null;
+              connect();
+            }, 3000);
+          }
+        };
+      } catch {
+        if (!stopped && reconnectTimer === null) {
+          reconnectTimer = window.setTimeout(() => {
+            reconnectTimer = null;
+            connect();
+          }, 3000);
+        }
+      }
+    };
+
+    connect();
+
+    return () => {
+      stopped = true;
+      source?.close();
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer);
+      }
+    };
+  }, [user, getToken]);
 
   const handleLogout = () => {
     setUser(null);
@@ -290,13 +401,21 @@ function MediScanApp() {
     if (!user) return;
     try {
       const token = await getToken();
-      if (!token) return;
+      if (!token) throw new Error('Authentication required');
       if (data.companyName !== undefined) {
-        await authAPI.updateProfile(token, { companyName: data.companyName });
+        const response = await authAPI.updateProfile(token, { companyName: data.companyName });
+        setUser(prev => prev ? {
+          ...prev,
+          ...data,
+          companyName: response.companyName ?? data.companyName,
+          hasCompanyNameSet: true,
+        } : prev);
+        return;
       }
       setUser(prev => prev ? { ...prev, ...data } : prev);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to update profile:', error);
+      throw new Error(error?.message || 'Failed to update profile');
     }
   };
 
@@ -330,6 +449,11 @@ function MediScanApp() {
 
   const renderContent = () => {
     if (!user) return null;
+
+    if (user.role === 'ADMIN' && activeTab === 'admin') {
+      return <AdminManagementPanel getToken={getToken} />;
+    }
+
     switch (activeTab) {
       case 'dashboard':
         return <Dashboard medicines={medicines} user={user} />;
@@ -346,7 +470,7 @@ function MediScanApp() {
       case 'qrcode':
         return <QrCodeGenerator medicines={medicines} />;
       case 'admin':
-        return <AdminPanel medicines={medicines} />;
+        return <Dashboard medicines={medicines} user={user} />;
       case 'profile':
         return <Profile user={user} onUpdate={handleUpdateProfile} />;
       case 'notifications':
@@ -355,12 +479,22 @@ function MediScanApp() {
         return <BlockchainExplorer medicines={medicines} />;
       case 'analytics':
         return <Analytics user={user} medicines={medicines} />;
+      case 'tickets':
+        return <Tickets user={user} getToken={getToken} />;
       default:
         return <Dashboard medicines={medicines} user={user} />;
     }
   };
 
   const getTitle = () => {
+    if (user?.role === 'ADMIN') {
+      return 'System Administration';
+    }
+
+    if (activeTab === 'admin') {
+      return 'Dashboard';
+    }
+
     const titles: Record<string, string> = {
       dashboard: 'Dashboard',
       inventory: 'Inventory Management',
@@ -374,6 +508,7 @@ function MediScanApp() {
       profile: 'Account Settings',
       blockchain: 'Blockchain Explorer',
       analytics: 'Analytics',
+      tickets: 'Support Tickets',
     };
     return titles[activeTab] || 'Dashboard';
   };

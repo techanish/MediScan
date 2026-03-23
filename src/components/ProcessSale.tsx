@@ -16,6 +16,30 @@ interface ProcessSaleProps {
   onSale: (batchID: string, quantity: number, customerEmail: string) => Promise<{ success: boolean; error?: string }>;
 }
 
+const getAvailableUnits = (medicine: Medicine, userEmail: string): number => {
+  const owner = userEmail.toLowerCase();
+  let received = 0;
+  let transferredOut = 0;
+  let sold = 0;
+
+  (medicine.ownerHistory || []).forEach((h) => {
+    if (h.action === 'REGISTERED' && h.owner?.toLowerCase() === owner) {
+      received += medicine.totalUnits || 0;
+    }
+    if (h.action === 'TRANSFERRED' && h.owner?.toLowerCase() === owner) {
+      received += h.unitsPurchased || 0;
+    }
+    if (h.action === 'TRANSFERRED' && h.from?.toLowerCase() === owner) {
+      transferredOut += h.unitsPurchased || 0;
+    }
+    if (h.action === 'PURCHASED' && h.from?.toLowerCase() === owner) {
+      sold += h.unitsPurchased || 0;
+    }
+  });
+
+  return Math.max(0, Number(received) - Number(transferredOut) - Number(sold));
+};
+
 export function ProcessSale({ medicines, user, onSale }: ProcessSaleProps) {
   const [selectedBatch, setSelectedBatch] = useState('');
   const [quantity, setQuantity] = useState('');
@@ -41,8 +65,8 @@ export function ProcessSale({ medicines, user, onSale }: ProcessSaleProps) {
     if (!selectedMedicine) return;
 
     const qty = parseInt(quantity);
-    if (qty > (selectedMedicine.remainingUnits || 0)) {
-      toast.error('Insufficient stock');
+    if (isNaN(qty) || qty <= 0) {
+      toast.error('Please enter a valid quantity');
       return;
     }
 
@@ -97,13 +121,13 @@ export function ProcessSale({ medicines, user, onSale }: ProcessSaleProps) {
 
           <div className="grid grid-cols-2 gap-6">
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Quantity</label>
+              <label htmlFor="sale-quantity" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Quantity</label>
               <input
+                id="sale-quantity"
                 type="number"
                 value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
                 min="1"
-                max={selectedMedicine?.remainingUnits}
                 className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all text-gray-900 dark:text-gray-100"
                 required
               />

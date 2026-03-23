@@ -38,7 +38,18 @@ const MedicineSchema = new mongoose.Schema({
       from: String, // Who transferred/sold this (for tracking outgoing transfers/sales)
       fromLocation: { type: String, default: "" },
       time: { type: Date, default: Date.now },
-      notes: { type: String, default: "" } // Additional notes for the action
+      notes: { type: String, default: "" }, // Additional notes for the action
+      transferId: { type: String, default: "" },
+      transferNonce: { type: String, default: "" },
+      transferPayloadHash: { type: String, default: "" },
+      transferSignature: { type: String, default: "" },
+      initiatedByIp: { type: String, default: "" },
+      initiatedByUserAgent: { type: String, default: "" },
+      blockchainStatus: { type: String, default: "" }, // PENDING / CONFIRMED / FAILED
+      blockchainIndex: { type: Number, default: null },
+      blockchainHash: { type: String, default: "" },
+      blockchainPreviousHash: { type: String, default: "" },
+      blockchainTimestamp: { type: Date, default: null }
     }
   ],
 

@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   Settings,
   Bell,
+  MessageSquare,
   X,
   Users,
   Cpu,
@@ -38,13 +39,16 @@ export function Sidebar({ user, activeTab, setActiveTab, isOpen, setIsOpen, onLo
     { id: 'blockchain', label: 'Blockchain Explorer', icon: Cpu, roles: ['ALL'] },
     { id: 'analytics', label: 'Analytics', icon: BarChart3, roles: ['ALL'] },
     { id: 'notifications', label: 'Notifications', icon: Bell, roles: ['ALL'] },
-    { id: 'admin', label: 'Administration', icon: Users, roles: ['ADMIN', 'MANUFACTURER'] },
+    { id: 'tickets', label: 'Tickets', icon: MessageSquare, roles: ['ALL'] },
+    { id: 'admin', label: 'Administration', icon: Users, roles: ['ADMIN'] },
     { id: 'profile', label: 'Profile', icon: Settings, roles: ['ALL'] },
   ];
 
-  const filteredItems = menuItems.filter(item =>
-    item.roles.includes('ALL') || item.roles.includes(user.role)
-  );
+  const filteredItems = user.role === 'ADMIN'
+    ? menuItems.filter((item) => item.id === 'admin' || item.id === 'tickets')
+    : menuItems.filter(item =>
+        item.roles.includes('ALL') || item.roles.includes(user.role)
+      );
 
   return (
     <>
@@ -75,7 +79,7 @@ export function Sidebar({ user, activeTab, setActiveTab, isOpen, setIsOpen, onLo
             <h1 className="text-xl font-bold text-gray-900 dark:text-white tracking-tight">MediScan</h1>
             <p className="text-xs text-gray-500 dark:text-gray-400 font-medium tracking-wide">VERIFICATION SYSTEM</p>
           </div>
-          <button onClick={() => setIsOpen(false)} className="ml-auto lg:hidden p-2 text-gray-400">
+          <button onClick={() => setIsOpen(false)} title="Close sidebar" aria-label="Close sidebar" className="ml-auto lg:hidden p-2 text-gray-400">
             <X className="w-5 h-5" />
           </button>
         </div>

@@ -111,6 +111,189 @@ export const authAPI = {
       body: JSON.stringify({ userId, role }),
     });
   },
+
+  /**
+   * Admin: update user role/profile fields
+   */
+  adminUpdateUser: async (
+    sessionToken: string,
+    userId: string,
+    data: { role?: string; companyName?: string; firstName?: string; lastName?: string }
+  ) => {
+    return fetchAPI(`/admin/users/${userId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(sessionToken),
+      body: JSON.stringify(data),
+    });
+  },
+};
+
+// ============================================
+// ADMIN API
+// ============================================
+
+export const adminAPI = {
+  /**
+   * Get all platform users (Admin only)
+   */
+  listUsers: async (sessionToken: string) => {
+    return fetchAPI('/admin/users', {
+      headers: getAuthHeaders(sessionToken),
+    });
+  },
+
+  /**
+   * Get admin overview stats
+   */
+  getOverview: async (sessionToken: string) => {
+    return fetchAPI('/admin/overview', {
+      headers: getAuthHeaders(sessionToken),
+    });
+  },
+
+  /**
+   * Get admin audit logs
+   */
+  getAudit: async (sessionToken: string, limit = 50) => {
+    return fetchAPI(`/admin/audit?limit=${limit}`, {
+      headers: getAuthHeaders(sessionToken),
+    });
+  },
+
+  /**
+   * Get tracked login sessions
+   */
+  getSessions: async (sessionToken: string, options?: { limit?: number; email?: string; activeOnly?: boolean }) => {
+    const params = new URLSearchParams();
+    if (options?.limit) params.set('limit', String(options.limit));
+    if (options?.email) params.set('email', options.email);
+    if (typeof options?.activeOnly === 'boolean') params.set('activeOnly', String(options.activeOnly));
+    const query = params.toString();
+    return fetchAPI(`/admin/sessions${query ? `?${query}` : ''}`, {
+      headers: getAuthHeaders(sessionToken),
+    });
+  },
+
+  /**
+   * Ban/unban a user account
+   */
+  updateUserStatus: async (sessionToken: string, userId: string, banned: boolean) => {
+    return fetchAPI(`/admin/users/${userId}/status`, {
+      method: 'PUT',
+      headers: getAuthHeaders(sessionToken),
+      body: JSON.stringify({ banned }),
+    });
+  },
+
+  /**
+   * Bootstrap first admin using server bootstrap key (no session required)
+   */
+  bootstrapAdmin: async (data: {
+    bootstrapKey: string;
+    email?: string;
+    userId?: string;
+    companyName?: string;
+    allowExistingAdmin?: boolean;
+  }) => {
+    return fetchAPI('/admin/bootstrap', {
+      method: 'POST',
+      headers: {
+        'x-admin-bootstrap-key': data.bootstrapKey,
+      },
+      body: JSON.stringify(data),
+    });
+  },
+
+  /**
+   * Bootstrap test admin account for QA/testing
+   */
+  bootstrapTestAdmin: async (data: {
+    bootstrapKey: string;
+    email?: string;
+    companyName?: string;
+    createIfMissing?: boolean;
+  }) => {
+    return fetchAPI('/admin/bootstrap/test', {
+      method: 'POST',
+      headers: {
+        'x-admin-bootstrap-key': data.bootstrapKey,
+      },
+      body: JSON.stringify(data),
+    });
+  },
+};
+
+// ============================================
+// TICKET API
+// ============================================
+
+export const ticketAPI = {
+  /**
+   * List tickets for current user (admin sees all)
+   */
+  list: async (
+    sessionToken: string,
+    filters?: { status?: string; priority?: string; category?: string }
+  ) => {
+    const params = new URLSearchParams();
+    if (filters?.status) params.set('status', filters.status);
+    if (filters?.priority) params.set('priority', filters.priority);
+    if (filters?.category) params.set('category', filters.category);
+    const query = params.toString();
+
+    return fetchAPI(`/tickets${query ? `?${query}` : ''}`, {
+      headers: getAuthHeaders(sessionToken),
+    });
+  },
+
+  /**
+   * Create a new support ticket
+   */
+  create: async (
+    sessionToken: string,
+    data: { title: string; description: string; category?: string; priority?: string }
+  ) => {
+    return fetchAPI('/tickets', {
+      method: 'POST',
+      headers: getAuthHeaders(sessionToken),
+      body: JSON.stringify(data),
+    });
+  },
+
+  /**
+   * Get ticket details
+   */
+  getById: async (sessionToken: string, ticketId: string) => {
+    return fetchAPI(`/tickets/${ticketId}`, {
+      headers: getAuthHeaders(sessionToken),
+    });
+  },
+
+  /**
+   * Add comment to ticket
+   */
+  addComment: async (sessionToken: string, ticketId: string, data: { message: string }) => {
+    return fetchAPI(`/tickets/${ticketId}/comments`, {
+      method: 'POST',
+      headers: getAuthHeaders(sessionToken),
+      body: JSON.stringify(data),
+    });
+  },
+
+  /**
+   * Admin update ticket (status/priority/assignment)
+   */
+  update: async (
+    sessionToken: string,
+    ticketId: string,
+    data: { status?: string; priority?: string; assignedTo?: { userId?: string; email?: string; name?: string } }
+  ) => {
+    return fetchAPI(`/tickets/${ticketId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(sessionToken),
+      body: JSON.stringify(data),
+    });
+  },
 };
 
 // ============================================

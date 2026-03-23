@@ -9,11 +9,13 @@ const { clerkClient } = require("@clerk/clerk-sdk-node");
 const Medicine = require("./models/Medicine");
 const ScanLog = require("./models/ScanLog");
 const Notification = require("./models/Notification");
+const Ticket = require("./models/Ticket");
 const { clerkAuth, authorizeRoles } = require("./middleware/clerkAuth");
 const rateLimit = require("express-rate-limit");
 const mongoSanitize = require("express-mongo-sanitize");
 const { calculateTrustScore, computeIntegrityHash } = require("./ai/fraudDetection");
 const AuditLog = require("./models/AuditLog");
+const LoginSession = require("./models/LoginSession");
 const { sendNotification } = require("./utils/notification");
 const { filterMedicineByRole } = require("./utils/roleViews");
 
@@ -24,6 +26,7 @@ const blockchain = require("./utils/blockchain");
 const DEFAULT_CUSTOMER_EMAIL = "CUSTOMER";
 
 const app = express();
+const realtimeClients = new Map();
 
 // CORS configuration - allow multiple origins
 const allowedOrigins = [
@@ -113,6 +116,110 @@ function signBatch(batchID) {
     .digest("hex");
 }
 
+function getClientIp(req) {
+  const forwarded = req.headers["x-forwarded-for"];
+  if (typeof forwarded === "string" && forwarded.length > 0) {
+    return forwarded.split(",")[0].trim();
+  }
+  return req.socket?.remoteAddress || req.ip || "UNKNOWN";
+}
+
+function parseBlockchainTimestamp(rawTimestamp, fallbackDate) {
+  const parsed = Number(rawTimestamp);
+  if (!Number.isFinite(parsed)) return fallbackDate;
+  // Python service currently returns unix seconds, but keep this resilient if it changes.
+  return new Date(parsed < 1e12 ? parsed * 1000 : parsed);
+}
+
+function publishRealtimeUpdate(eventType, payload = {}) {
+  const body = JSON.stringify({
+    eventType,
+    timestamp: new Date().toISOString(),
+    ...payload,
+  });
+
+  for (const [, client] of realtimeClients) {
+    try {
+      client.res.write(`event: app-update\n`);
+      client.res.write(`data: ${body}\n\n`);
+    } catch (err) {
+      realtimeClients.delete(client.id);
+    }
+  }
+}
+
+// Realtime stream (SSE) for instant app updates
+app.get("/events/stream", async (req, res) => {
+  try {
+    const token = typeof req.query.token === "string" ? req.query.token : "";
+    if (!token) {
+      return res.status(401).json({ error: "Missing token" });
+    }
+
+    const tokenPayload = await clerkClient.verifyToken(token, {
+      clockSkewInMs: 10000,
+    });
+
+    if (!tokenPayload || !tokenPayload.sub) {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+
+    const user = await clerkClient.users.getUser(tokenPayload.sub);
+    const primaryEmail =
+      (Array.isArray(user.emailAddresses) && user.emailAddresses[0]?.emailAddress) ||
+      user.primaryEmailAddress?.emailAddress ||
+      "";
+
+    if (!primaryEmail) {
+      return res.status(401).json({ error: "Unable to resolve user email" });
+    }
+
+    const clientId = crypto.randomUUID();
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders?.();
+
+    realtimeClients.set(clientId, {
+      id: clientId,
+      email: primaryEmail.toLowerCase(),
+      role: user.publicMetadata?.role || "CUSTOMER",
+      res,
+    });
+
+    res.write(`event: connected\n`);
+    res.write(`data: ${JSON.stringify({ clientId, timestamp: new Date().toISOString() })}\n\n`);
+
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(`event: ping\n`);
+        res.write(`data: ${JSON.stringify({ timestamp: new Date().toISOString() })}\n\n`);
+      } catch {
+        clearInterval(heartbeat);
+        realtimeClients.delete(clientId);
+      }
+    }, 25000);
+
+    req.on("close", () => {
+      clearInterval(heartbeat);
+      realtimeClients.delete(clientId);
+    });
+  } catch (err) {
+    console.error("❌ SSE stream error:", err.message);
+    if (!res.headersSent) {
+      res.status(401).json({ error: "Authentication failed" });
+    }
+  }
+});
+
+async function generateTicketNumber() {
+  const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const sequence = Math.floor(Math.random() * 90000) + 10000;
+  return `MS-${datePart}-${sequence}`;
+}
+
 /* ======================================
    ✅ USER PROFILE ROUTES (Clerk-based)
 ====================================== */
@@ -121,6 +228,10 @@ function signBatch(batchID) {
 app.get("/auth/profile", clerkAuth, async (req, res) => {
   try {
     const user = await clerkClient.users.getUser(req.user.id);
+    const companyName = (user.publicMetadata?.companyName || "").toString();
+    const hasCompanyNameSet = Boolean(
+      user.publicMetadata?.hasCompanyNameSet || companyName.trim() !== ""
+    );
     
     res.json({ 
       success: true,
@@ -129,7 +240,8 @@ app.get("/auth/profile", clerkAuth, async (req, res) => {
         email: req.user.email,
         name: req.user.name,
         role: req.user.role,
-        companyName: user.publicMetadata?.companyName || ""
+        companyName,
+        hasCompanyNameSet,
       }
     });
   } catch (err) {
@@ -148,7 +260,10 @@ app.put("/auth/profile", clerkAuth, async (req, res) => {
 
     // Get current user data to check if company name was already set
     const user = await clerkClient.users.getUser(req.user.id);
-    const hasCompanyNameSet = user.publicMetadata?.hasCompanyNameSet || false;
+    const existingCompanyName = (user.publicMetadata?.companyName || "").toString();
+    const hasCompanyNameSet = Boolean(
+      user.publicMetadata?.hasCompanyNameSet || existingCompanyName.trim() !== ""
+    );
 
     if (hasCompanyNameSet) {
       return res.status(403).json({ 
@@ -171,6 +286,219 @@ app.put("/auth/profile", clerkAuth, async (req, res) => {
       companyName: companyName.trim()
     });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ======================================
+   ✅ TICKETING ROUTES
+====================================== */
+
+// Create a ticket (all authenticated users)
+app.post("/tickets", clerkAuth, async (req, res) => {
+  try {
+    const { title, description, category, priority } = req.body || {};
+
+    if (!title || !title.trim()) {
+      return res.status(400).json({ error: "Ticket title is required" });
+    }
+    if (!description || !description.trim()) {
+      return res.status(400).json({ error: "Ticket description is required" });
+    }
+
+    const ticket = await Ticket.create({
+      ticketNumber: await generateTicketNumber(),
+      title: title.trim(),
+      description: description.trim(),
+      category: category || "GENERAL",
+      priority: priority || "MEDIUM",
+      createdBy: {
+        userId: req.user.id,
+        email: req.user.email,
+        name: req.user.name,
+        role: req.user.role,
+        companyName: req.user.companyName || "",
+      },
+      comments: [
+        {
+          authorId: req.user.id,
+          authorEmail: req.user.email,
+          authorName: req.user.name,
+          authorRole: req.user.role,
+          message: "Ticket created",
+        },
+      ],
+      lastUpdatedAt: new Date(),
+    });
+
+    await AuditLog.create({
+      action: "TICKET_CREATED",
+      user: req.user.email,
+      details: {
+        ticketId: ticket._id.toString(),
+        ticketNumber: ticket.ticketNumber,
+        title: ticket.title,
+        priority: ticket.priority,
+        category: ticket.category,
+      },
+    });
+
+    publishRealtimeUpdate("ticket.created", { ticketId: ticket._id.toString() });
+
+    res.status(201).json({ success: true, ticket });
+  } catch (err) {
+    console.error("❌ Ticket create error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// List tickets (admins see all, others see only their own)
+app.get("/tickets", clerkAuth, async (req, res) => {
+  try {
+    const { status, priority, category } = req.query;
+    const query = {};
+
+    if (status) query.status = status;
+    if (priority) query.priority = priority;
+    if (category) query.category = category;
+
+    if (req.user.role !== "ADMIN") {
+      query["createdBy.userId"] = req.user.id;
+    }
+
+    const tickets = await Ticket.find(query).sort({ updatedAt: -1 }).limit(200);
+
+    res.json({
+      success: true,
+      count: tickets.length,
+      tickets,
+    });
+  } catch (err) {
+    console.error("❌ Ticket list error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get ticket details (admins all, others only own tickets)
+app.get("/tickets/:ticketId", clerkAuth, async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const ticket = await Ticket.findById(ticketId);
+
+    if (!ticket) {
+      return res.status(404).json({ error: "Ticket not found" });
+    }
+
+    const isOwner = ticket.createdBy?.userId === req.user.id;
+    if (req.user.role !== "ADMIN" && !isOwner) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
+    res.json({ success: true, ticket });
+  } catch (err) {
+    console.error("❌ Ticket details error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Add comment to a ticket (admins on all, users on own)
+app.post("/tickets/:ticketId/comments", clerkAuth, async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { message } = req.body || {};
+
+    if (!message || !message.trim()) {
+      return res.status(400).json({ error: "Comment message is required" });
+    }
+
+    const ticket = await Ticket.findById(ticketId);
+    if (!ticket) {
+      return res.status(404).json({ error: "Ticket not found" });
+    }
+
+    const isOwner = ticket.createdBy?.userId === req.user.id;
+    if (req.user.role !== "ADMIN" && !isOwner) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
+    ticket.comments.push({
+      authorId: req.user.id,
+      authorEmail: req.user.email,
+      authorName: req.user.name,
+      authorRole: req.user.role,
+      message: message.trim(),
+    });
+    ticket.lastUpdatedAt = new Date();
+    await ticket.save();
+
+    publishRealtimeUpdate("ticket.commented", { ticketId: ticket._id.toString() });
+
+    res.json({ success: true, ticket });
+  } catch (err) {
+    console.error("❌ Ticket comment error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update ticket status/assignment (admins only)
+app.put("/tickets/:ticketId", clerkAuth, authorizeRoles("ADMIN"), async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { status, priority, assignedTo } = req.body || {};
+    const ticket = await Ticket.findById(ticketId);
+
+    if (!ticket) {
+      return res.status(404).json({ error: "Ticket not found" });
+    }
+
+    const validStatus = ["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"];
+    const validPriority = ["LOW", "MEDIUM", "HIGH", "URGENT"];
+
+    if (status && !validStatus.includes(status)) {
+      return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatus.join(", ")}` });
+    }
+
+    if (priority && !validPriority.includes(priority)) {
+      return res.status(400).json({ error: `Invalid priority. Must be one of: ${validPriority.join(", ")}` });
+    }
+
+    if (status) ticket.status = status;
+    if (priority) ticket.priority = priority;
+    if (assignedTo && typeof assignedTo === "object") {
+      ticket.assignedTo = {
+        userId: assignedTo.userId || "",
+        email: assignedTo.email || "",
+        name: assignedTo.name || "",
+      };
+    }
+    ticket.lastUpdatedAt = new Date();
+
+    ticket.comments.push({
+      authorId: req.user.id,
+      authorEmail: req.user.email,
+      authorName: req.user.name,
+      authorRole: req.user.role,
+      message: `Ticket updated${status ? `: status -> ${status}` : ""}${priority ? `, priority -> ${priority}` : ""}`,
+    });
+
+    await ticket.save();
+
+    await AuditLog.create({
+      action: "TICKET_UPDATED",
+      user: req.user.email,
+      details: {
+        ticketId: ticket._id.toString(),
+        ticketNumber: ticket.ticketNumber,
+        status: ticket.status,
+        priority: ticket.priority,
+      },
+    });
+
+    publishRealtimeUpdate("ticket.updated", { ticketId: ticket._id.toString() });
+
+    res.json({ success: true, ticket });
+  } catch (err) {
+    console.error("❌ Ticket update error:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -283,9 +611,14 @@ app.put("/auth/role", clerkAuth, authorizeRoles("ADMIN"), async (req, res) => {
       return res.status(400).json({ error: `Invalid role. Must be one of: ${validRoles.join(", ")}` });
     }
 
-    // Update user metadata in Clerk
+    const user = await clerkClient.users.getUser(userId);
+
+    // Update role while preserving existing metadata keys.
     await clerkClient.users.updateUser(userId, {
-      publicMetadata: { role }
+      publicMetadata: {
+        ...(user.publicMetadata || {}),
+        role
+      }
     });
 
     res.json({ 
@@ -295,6 +628,408 @@ app.put("/auth/role", clerkAuth, authorizeRoles("ADMIN"), async (req, res) => {
       role
     });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Bootstrap first admin without requiring an existing ADMIN session.
+// Protected with ADMIN_BOOTSTRAP_KEY to prevent unauthorized elevation.
+function getBootstrapKey() {
+  return process.env.ADMIN_BOOTSTRAP_KEY || "techanish";
+}
+
+function isBootstrapAuthorized(req) {
+  const expectedKey = getBootstrapKey();
+  const providedKey = req.headers["x-admin-bootstrap-key"] || req.body?.bootstrapKey;
+  return Boolean(providedKey && providedKey === expectedKey);
+}
+
+async function promoteUserToAdmin(user, companyName) {
+  await clerkClient.users.updateUser(user.id, {
+    publicMetadata: {
+      ...(user.publicMetadata || {}),
+      role: "ADMIN",
+      ...(typeof companyName === "string"
+        ? { companyName: companyName.trim(), hasCompanyNameSet: true }
+        : {})
+    }
+  });
+
+  return clerkClient.users.getUser(user.id);
+}
+
+app.post("/admin/bootstrap", async (req, res) => {
+  try {
+    if (!isBootstrapAuthorized(req)) {
+      return res.status(403).json({ error: "Invalid bootstrap key" });
+    }
+
+    const { email, userId, companyName, allowExistingAdmin } = req.body || {};
+    if (!email && !userId) {
+      return res.status(400).json({ error: "Provide either email or userId" });
+    }
+
+    const userListResponse = await clerkClient.users.getUserList({ limit: 500 });
+    const users = userListResponse.data || userListResponse || [];
+
+    const admins = users.filter((u) => u.publicMetadata?.role === "ADMIN");
+    if (admins.length > 0 && !allowExistingAdmin) {
+      return res.status(409).json({
+        error: "An ADMIN user already exists. Set allowExistingAdmin=true to intentionally promote another admin.",
+        admins: admins.map((u) => u.emailAddresses?.[0]?.emailAddress).filter(Boolean)
+      });
+    }
+
+    let targetUser = null;
+    if (userId) {
+      targetUser = await clerkClient.users.getUser(userId);
+    } else {
+      const normalizedEmail = String(email).toLowerCase();
+      targetUser = users.find(
+        (u) => (u.emailAddresses?.[0]?.emailAddress || "").toLowerCase() === normalizedEmail
+      );
+    }
+
+    if (!targetUser) {
+      return res.status(404).json({ error: "Target user not found" });
+    }
+
+    const updatedUser = await promoteUserToAdmin(targetUser, companyName);
+
+    res.json({
+      success: true,
+      message: "Admin bootstrap successful",
+      user: {
+        userId: updatedUser.id,
+        email: updatedUser.emailAddresses?.[0]?.emailAddress || "",
+        role: updatedUser.publicMetadata?.role || "CUSTOMER",
+        companyName: updatedUser.publicMetadata?.companyName || ""
+      }
+    });
+  } catch (err) {
+    console.error("❌ Admin bootstrap error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Bootstrap a dedicated test admin for QA/testing flows.
+// Requires x-admin-bootstrap-key and defaults to test.admin@mediscan.com.
+app.post("/admin/bootstrap/test", async (req, res) => {
+  try {
+    if (!isBootstrapAuthorized(req)) {
+      return res.status(403).json({ error: "Invalid bootstrap key" });
+    }
+
+    const testEmail = String(req.body?.email || "test.admin@mediscan.com").toLowerCase();
+    const companyName = req.body?.companyName || "MediScan Test Admin";
+    const createIfMissing = req.body?.createIfMissing !== false;
+
+    const userListResponse = await clerkClient.users.getUserList({ limit: 500 });
+    const users = userListResponse.data || userListResponse || [];
+
+    let targetUser = users.find(
+      (u) => (u.emailAddresses?.[0]?.emailAddress || "").toLowerCase() === testEmail
+    );
+
+    if (!targetUser && createIfMissing) {
+      try {
+        targetUser = await clerkClient.users.createUser({
+          emailAddress: [testEmail],
+          firstName: "Test",
+          lastName: "Admin",
+          publicMetadata: {
+            role: "ADMIN",
+            companyName,
+            hasCompanyNameSet: true,
+          },
+        });
+      } catch (createErr) {
+        return res.status(500).json({
+          error: "Failed to create test admin user in Clerk",
+          message: createErr.message,
+        });
+      }
+    }
+
+    if (!targetUser) {
+      return res.status(404).json({
+        error: "Test admin user not found",
+        message: "Set createIfMissing=true or create the user in Clerk first.",
+      });
+    }
+
+    const updatedUser = await promoteUserToAdmin(targetUser, companyName);
+
+    res.json({
+      success: true,
+      message: "Test admin is ready",
+      user: {
+        userId: updatedUser.id,
+        email: updatedUser.emailAddresses?.[0]?.emailAddress || "",
+        role: updatedUser.publicMetadata?.role || "CUSTOMER",
+        companyName: updatedUser.publicMetadata?.companyName || "",
+      },
+    });
+  } catch (err) {
+    console.error("❌ Test admin bootstrap error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin: list all platform users with core profile details
+app.get("/admin/users", clerkAuth, authorizeRoles("ADMIN"), async (req, res) => {
+  try {
+    const userListResponse = await clerkClient.users.getUserList({ limit: 500 });
+    const users = userListResponse.data || userListResponse || [];
+
+    const mapUser = (u) => {
+      const email = u.emailAddresses?.[0]?.emailAddress || "";
+      return {
+        userId: u.id,
+        email,
+        name: [u.firstName, u.lastName].filter(Boolean).join(" ") || u.username || email || "User",
+        firstName: u.firstName || "",
+        lastName: u.lastName || "",
+        role: u.publicMetadata?.role || "CUSTOMER",
+        companyName: u.publicMetadata?.companyName || "",
+        createdAt: u.createdAt,
+        banned: Boolean(u.banned || u.publicMetadata?.isBanned),
+      };
+    };
+
+    const usersById = new Map();
+    users.forEach((u) => usersById.set(u.id, mapUser(u)));
+
+    // Some Clerk tenants may hide natively banned users from getUserList.
+    // Recover them from audit trail so Admin can still unban.
+    const auditedUserIds = await AuditLog.distinct("details.targetUserId", {
+      action: { $in: ["ADMIN_USER_BANNED", "ADMIN_USER_UNBANNED"] },
+      "details.targetUserId": { $exists: true, $ne: "" },
+    });
+
+    for (const id of auditedUserIds) {
+      if (usersById.has(id)) continue;
+      try {
+        const user = await clerkClient.users.getUser(id);
+        usersById.set(id, mapUser(user));
+      } catch (err) {
+        // User may have been deleted; ignore this record.
+      }
+    }
+
+    const mappedUsers = Array.from(usersById.values()).sort((a, b) => a.email.localeCompare(b.email));
+
+    res.json({
+      success: true,
+      count: mappedUsers.length,
+      users: mappedUsers,
+    });
+  } catch (err) {
+    console.error("❌ Admin users list error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin: update a user's role/profile metadata (company name, names)
+app.put("/admin/users/:userId", clerkAuth, authorizeRoles("ADMIN"), async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { role, companyName, firstName, lastName } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ error: "userId is required" });
+    }
+
+    const validRoles = ["MANUFACTURER", "DISTRIBUTOR", "PHARMACY", "CUSTOMER", "ADMIN"];
+    if (role && !validRoles.includes(role)) {
+      return res.status(400).json({ error: `Invalid role. Must be one of: ${validRoles.join(", ")}` });
+    }
+
+    const user = await clerkClient.users.getUser(userId);
+
+    const nextPublicMetadata = {
+      ...(user.publicMetadata || {}),
+      ...(role ? { role } : {}),
+      ...(typeof companyName === "string" ? { companyName: companyName.trim(), hasCompanyNameSet: true } : {}),
+    };
+
+    const updatePayload = {
+      publicMetadata: nextPublicMetadata,
+      ...(typeof firstName === "string" ? { firstName: firstName.trim() } : {}),
+      ...(typeof lastName === "string" ? { lastName: lastName.trim() } : {}),
+    };
+
+    await clerkClient.users.updateUser(userId, updatePayload);
+    const updated = await clerkClient.users.getUser(userId);
+
+    publishRealtimeUpdate("admin.user.updated", { userId: updated.id });
+
+    res.json({
+      success: true,
+      message: "User updated successfully",
+      user: {
+        userId: updated.id,
+        email: updated.emailAddresses?.[0]?.emailAddress || "",
+        name: [updated.firstName, updated.lastName].filter(Boolean).join(" ") || updated.username || "User",
+        firstName: updated.firstName || "",
+        lastName: updated.lastName || "",
+        role: updated.publicMetadata?.role || "CUSTOMER",
+        companyName: updated.publicMetadata?.companyName || "",
+      }
+    });
+  } catch (err) {
+    console.error("❌ Admin user update error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin: ban/unban user account
+app.put("/admin/users/:userId/status", clerkAuth, authorizeRoles("ADMIN"), async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { banned } = req.body || {};
+
+    if (!userId) {
+      return res.status(400).json({ error: "userId is required" });
+    }
+
+    if (typeof banned !== "boolean") {
+      return res.status(400).json({ error: "banned must be a boolean" });
+    }
+
+    const current = await clerkClient.users.getUser(userId);
+
+    // Keep ban state in metadata for consistent admin listing and recovery.
+    // Only unban natively if user is already natively banned.
+    if (!banned && current.banned && typeof clerkClient.users.unbanUser === "function") {
+      try {
+        await clerkClient.users.unbanUser(userId);
+      } catch (clerkUnbanErr) {
+        console.warn("⚠️ Clerk native unban failed, metadata flag will still be cleared:", clerkUnbanErr.message);
+      }
+    }
+
+    // Always persist isBanned in metadata so UI and APIs remain consistent.
+    await clerkClient.users.updateUser(userId, {
+      publicMetadata: {
+        ...(current.publicMetadata || {}),
+        isBanned: banned,
+      }
+    });
+
+    const updated = await clerkClient.users.getUser(userId);
+
+    await AuditLog.create({
+      action: banned ? "ADMIN_USER_BANNED" : "ADMIN_USER_UNBANNED",
+      user: req.user.email,
+      details: {
+        targetUserId: userId,
+        targetEmail: updated.emailAddresses?.[0]?.emailAddress || "",
+      },
+    });
+
+    publishRealtimeUpdate("admin.user.status.updated", { userId: updated.id, banned });
+
+    res.json({
+      success: true,
+      message: banned ? "User banned successfully" : "User unbanned successfully",
+      user: {
+        userId: updated.id,
+        email: updated.emailAddresses?.[0]?.emailAddress || "",
+        banned: Boolean(updated.banned || updated.publicMetadata?.isBanned),
+      },
+    });
+  } catch (err) {
+    console.error("❌ Admin user status update error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin: overview cards and high-level metrics
+app.get("/admin/overview", clerkAuth, authorizeRoles("ADMIN"), async (req, res) => {
+  try {
+    const userListResponse = await clerkClient.users.getUserList({ limit: 500 });
+    const users = userListResponse.data || userListResponse || [];
+
+    const totalUsers = users.length;
+    const bannedUsers = users.filter((u) => Boolean(u.banned || u.publicMetadata?.isBanned)).length;
+    const usersByRole = users.reduce((acc, u) => {
+      const role = u.publicMetadata?.role || "CUSTOMER";
+      acc[role] = (acc[role] || 0) + 1;
+      return acc;
+    }, {});
+
+    const totalMedicines = await Medicine.countDocuments();
+    const activeMedicines = await Medicine.countDocuments({ status: "ACTIVE" });
+    const blockedMedicines = await Medicine.countDocuments({ status: "BLOCKED" });
+    const soldOutMedicines = await Medicine.countDocuments({ status: "SOLD_OUT" });
+    const totalScans = await ScanLog.countDocuments();
+    const suspiciousScans = await ScanLog.countDocuments({ anomaly: true });
+    const recentAuditEvents = await AuditLog.countDocuments({
+      timestamp: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+    });
+
+    res.json({
+      success: true,
+      overview: {
+        totalUsers,
+        bannedUsers,
+        usersByRole,
+        totalMedicines,
+        activeMedicines,
+        blockedMedicines,
+        soldOutMedicines,
+        totalScans,
+        suspiciousScans,
+        recentAuditEvents,
+      },
+    });
+  } catch (err) {
+    console.error("❌ Admin overview error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin: latest audit log feed
+app.get("/admin/audit", clerkAuth, authorizeRoles("ADMIN"), async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+    const audit = await AuditLog.find().sort({ timestamp: -1 }).limit(limit);
+    res.json({
+      success: true,
+      count: audit.length,
+      audit,
+    });
+  } catch (err) {
+    console.error("❌ Admin audit fetch error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin: login sessions tracker
+app.get("/admin/sessions", clerkAuth, authorizeRoles("ADMIN"), async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+    const email = req.query.email ? String(req.query.email).toLowerCase() : "";
+    const activeOnly = req.query.activeOnly === "true";
+
+    const filter = {
+      ...(email ? { email } : {}),
+      ...(activeOnly ? { isActive: true } : {}),
+    };
+
+    const sessions = await LoginSession.find(filter)
+      .sort({ lastSeenAt: -1 })
+      .limit(limit)
+      .lean();
+
+    res.json({
+      success: true,
+      count: sessions.length,
+      sessions,
+    });
+  } catch (err) {
+    console.error("❌ Admin sessions fetch error:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -494,6 +1229,8 @@ app.post("/medicine/register",
         'normal'
       );
 
+      publishRealtimeUpdate("medicine.registered", { batchID: med.batchID });
+
       res.status(201).json({ 
         success: true,
         message: "✅ Medicine Registered", 
@@ -611,6 +1348,60 @@ app.post("/medicine/transfer/:batchID",
         });
       }
 
+      const transferTime = new Date();
+      const transferId = `tx_${crypto.randomUUID()}`;
+      const transferNonce = crypto.randomBytes(16).toString("hex");
+      const initiatedByIp = getClientIp(req);
+      const initiatedByUserAgent = req.get("user-agent") || "UNKNOWN";
+
+      const canonicalTransferPayload = {
+        eventType: "MEDICINE_TRANSFER",
+        version: "1.0",
+        transferId,
+        batchID: med.batchID,
+        medicineName: med.name,
+        fromOwner: req.user.email,
+        fromRole: req.user.role,
+        toOwner: newOwnerEmail,
+        toRole: newOwnerRole,
+        units,
+        fromLocation: fromLocation || med.location || "",
+        toLocation: toLocation || "",
+        transferTime: transferTime.toISOString(),
+        transferNonce,
+        initiatedByIp,
+        initiatedByUserAgent
+      };
+
+      const transferPayloadHash = crypto
+        .createHash("sha256")
+        .update(JSON.stringify(canonicalTransferPayload))
+        .digest("hex");
+
+      const transferSignature = crypto
+        .createHmac(
+          "sha256",
+          process.env.BLOCKCHAIN_EVENT_SECRET || process.env.QR_SECRET || "mediscan-transfer-signing-key"
+        )
+        .update(transferPayloadHash)
+        .digest("hex");
+
+      let blockchainBlock;
+      try {
+        blockchainBlock = await blockchain.addBlock({
+          ...canonicalTransferPayload,
+          transferPayloadHash,
+          transferSignature
+        });
+      } catch (blockchainErr) {
+        console.error("❌ Blockchain write failed. Transfer aborted:", blockchainErr.message);
+        return res.status(502).json({
+          error: "Blockchain service unavailable. Transfer was not saved to keep ledger and database in sync."
+        });
+      }
+
+      const blockchainTimestamp = parseBlockchainTimestamp(blockchainBlock.timestamp, transferTime);
+
       // If manufacturer is transferring, reduce their remainingUnits
       if (med.currentOwner.toLowerCase() === userEmail) {
         med.remainingUnits -= units;
@@ -627,7 +1418,19 @@ app.post("/medicine/transfer/:batchID",
         action: "TRANSFERRED",
         unitsPurchased: units,
         from: req.user.email,
-        fromLocation: fromLocation || med.location || ""
+        fromLocation: fromLocation || med.location || "",
+        time: transferTime,
+        transferId,
+        transferNonce,
+        transferPayloadHash,
+        transferSignature,
+        initiatedByIp,
+        initiatedByUserAgent,
+        blockchainStatus: "CONFIRMED",
+        blockchainIndex: blockchainBlock.index,
+        blockchainHash: blockchainBlock.hash || "",
+        blockchainPreviousHash: blockchainBlock.previous_hash || "",
+        blockchainTimestamp
       });
 
       // Keep latest known stock location on the batch.
@@ -658,10 +1461,20 @@ app.post("/medicine/transfer/:batchID",
         'normal'
       );
 
+      publishRealtimeUpdate("medicine.transferred", { batchID: med.batchID });
+
       res.json({ 
         success: true,
         message: `✅ ${units} units transferred successfully`, 
-        medicine: med 
+        medicine: med,
+        blockchain: {
+          status: "CONFIRMED",
+          transferId,
+          blockIndex: blockchainBlock.index,
+          blockHash: blockchainBlock.hash,
+          previousHash: blockchainBlock.previous_hash,
+          blockTimestamp: blockchainTimestamp
+        }
       });
     } catch (err) {
       console.error("❌ Transfer error:", err);
@@ -750,7 +1563,7 @@ app.post("/medicine/purchase/:batchID",
       // Check if enough units are available
       if (availableUnits < unitsPurchased) {
         return res.status(400).json({ 
-          error: "Insufficient stock",
+          error: `Insufficient stock. Only ${availableUnits} units available`,
           message: `Only ${availableUnits} units available`
         });
       }
@@ -803,6 +1616,8 @@ app.post("/medicine/purchase/:batchID",
         batchID,
         'normal'
       );
+
+      publishRealtimeUpdate("medicine.purchased", { batchID: med.batchID });
 
       res.json({ 
         success: true,
@@ -1285,6 +2100,8 @@ app.put("/notifications/:id/read", clerkAuth, async (req, res) => {
       return res.status(404).json({ error: "Notification not found" });
     }
 
+    publishRealtimeUpdate("notification.read", { notificationId: notification._id.toString() });
+
     res.json({ success: true, notification });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1298,6 +2115,8 @@ app.put("/notifications/read-all", clerkAuth, async (req, res) => {
       { userId: req.user.email, read: false },
       { read: true }
     );
+
+    publishRealtimeUpdate("notification.read_all", { userId: req.user.email });
 
     res.json({ success: true, message: "All notifications marked as read" });
   } catch (err) {
@@ -1322,7 +2141,7 @@ app.delete("/notifications/:id", clerkAuth, async (req, res) => {
 // ✅ Helper function to create notification
 async function createNotification(userId, type, title, message, batchID = "", priority = "normal", metadata = {}) {
   try {
-    await Notification.create({
+    const created = await Notification.create({
       userId,
       type,
       title,
@@ -1330,6 +2149,11 @@ async function createNotification(userId, type, title, message, batchID = "", pr
       batchID,
       priority,
       metadata
+    });
+    publishRealtimeUpdate("notification.created", {
+      notificationId: created._id.toString(),
+      userId,
+      type,
     });
   } catch (err) {
     console.error("Failed to create notification:", err);

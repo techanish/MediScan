@@ -7,17 +7,29 @@ import {
   Users, ArrowRight, ExternalLink, CheckCircle2, XCircle,
   AlertOctagon, Cpu, Layers, Zap, Eye
 } from 'lucide-react';
-import { blockchainAPI } from '../utils/api';
+import { blockchainAPI, companiesAPI } from '../utils/api';
 import type { Medicine } from '../App';
 
-/* ─────────────── Address Hashing ─────────────── */
-function toAddress(input: string): string {
-  let hash = 0;
-  for (let i = 0; i < input.length; i++) {
-    hash = (Math.imul(31, hash) + input.charCodeAt(i)) >>> 0;
-  }
-  const hex = hash.toString(16).padStart(8, '0');
-  return `0x${hex.slice(0, 4).toUpperCase()}...${hex.slice(-3).toUpperCase()}`;
+function normalizeIdentity(value: string): string {
+  return String(value || '').trim().toLowerCase();
+}
+
+function looksLikeEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function fallbackCompanyName(email: string): string {
+  const local = email.split('@')[0] || email;
+  return local
+    .replace(/[._-]+/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function resolveCompanyName(identity: string, companyByEmail: Record<string, string>): string {
+  if (!identity) return 'N/A';
+  const normalized = normalizeIdentity(identity);
+  if (companyByEmail[normalized]) return companyByEmail[normalized];
+  return looksLikeEmail(identity) ? fallbackCompanyName(identity) : identity;
 }
 
 function statusIndicator(data: any): { label: string; color: string; icon: typeof CheckCircle2 } {
@@ -42,6 +54,42 @@ interface Block {
   data: any;
   previous_hash: string;
   hash: string;
+}
+
+function getBatchIdFromBlock(block: Block): string {
+  return String(block.data?.batchID || block.data?.batchId || '').trim();
+}
+
+function getActionLabel(data: any): string {
+  if (data?.action) return String(data.action).toUpperCase();
+  if (data?.eventType === 'MEDICINE_TRANSFER') return 'TRANSFER';
+  return 'DATA';
+}
+
+function extractTransferFields(data: any): {
+  action: string;
+  from: string;
+  to: string;
+  units: number | null;
+  fromLocation: string;
+  toLocation: string;
+  transferId: string;
+  payloadHash: string;
+  signature: string;
+} {
+  return {
+    action: getActionLabel(data),
+    from: String(data?.from || data?.fromOwner || data?.soldBy || data?.registeredBy || data?.manufacturer || '').trim(),
+    to: String(data?.to || data?.toOwner || data?.soldTo || '').trim(),
+    units: Number.isFinite(Number(data?.unitsTransferred ?? data?.unitsSold ?? data?.units))
+      ? Number(data?.unitsTransferred ?? data?.unitsSold ?? data?.units)
+      : null,
+    fromLocation: String(data?.fromLocation || '').trim(),
+    toLocation: String(data?.toLocation || '').trim(),
+    transferId: String(data?.transferId || '').trim(),
+    payloadHash: String(data?.transferPayloadHash || '').trim(),
+    signature: String(data?.transferSignature || '').trim(),
+  };
 }
 
 interface BlockchainExplorerProps {
@@ -81,7 +129,7 @@ function ChainStats({ chain, medicines }: { chain: Block[]; medicines: Medicine[
 }
 
 /* ─────────────── Medicine Tracker (Etherscan-style) ─────────────── */
-function MedicineTracker({ chain, medicines, initialBatchID }: { chain: Block[]; medicines: Medicine[]; initialBatchID?: string }) {
+function MedicineTracker({ chain, medicines, initialBatchID, companyByEmail }: { chain: Block[]; medicines: Medicine[]; initialBatchID?: string; companyByEmail: Record<string, string> }) {
   const [batchID, setBatchID] = useState(initialBatchID || '');
   const [result, setResult] = useState<{ medicine: Medicine | null; blocks: Block[] } | null>(null);
   const [searched, setSearched] = useState(false);
@@ -140,7 +188,7 @@ function MedicineTracker({ chain, medicines, initialBatchID }: { chain: Block[];
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
                     {[
-                      { label: 'Manufacturer', val: toAddress(result.medicine.manufacturer) },
+                      { label: 'Manufacturer', val: resolveCompanyName(result.medicine.manufacturer, companyByEmail) },
                       { label: 'Units Remaining', val: `${result.medicine.remainingUnits ?? '—'} / ${result.medicine.totalUnits}` },
                       { label: 'Mfg Date', val: result.medicine.mfgDate },
                       { label: 'Exp Date', val: result.medicine.expDate },
@@ -188,14 +236,14 @@ function MedicineTracker({ chain, medicines, initialBatchID }: { chain: Block[];
                                   <span className="text-xs text-gray-400">{h.date || h.time || '—'}</span>
                                 </div>
                                 <div className="flex items-center gap-2 text-sm">
-                                  <span className="font-mono text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 px-2 py-1 rounded-lg text-xs">
-                                    {toAddress(h.owner || h.from || '—')}
+                                  <span className="text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 px-2 py-1 rounded-lg text-xs font-medium">
+                                    {resolveCompanyName(h.owner || h.from || 'N/A', companyByEmail)}
                                   </span>
                                   {h.from && h.from !== h.owner && (
                                     <>
                                       <ArrowRight className="w-3 h-3 text-gray-400" />
-                                      <span className="font-mono text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 px-2 py-1 rounded-lg text-xs">
-                                        {toAddress(h.from)}
+                                      <span className="text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 px-2 py-1 rounded-lg text-xs font-medium">
+                                        {resolveCompanyName(h.from, companyByEmail)}
                                       </span>
                                     </>
                                   )}
@@ -251,11 +299,13 @@ function MedicineTracker({ chain, medicines, initialBatchID }: { chain: Block[];
 }
 
 /* ─────────────── Block Row ─────────────── */
-function BlockRow({ block, isGenesis, onClick }: { block: Block; isGenesis: boolean; onClick: () => void }) {
+function BlockRow({ block, isGenesis, onClick, companyByEmail }: { block: Block; isGenesis: boolean; onClick: () => void; companyByEmail: Record<string, string> }) {
   const date = new Date(block.timestamp * 1000);
-  const action = block.data?.action;
-  const from = block.data?.from || block.data?.registeredBy || block.data?.manufacturer;
-  const to = block.data?.to || block.data?.batchID;
+  const tx = extractTransferFields(block.data);
+  const action = tx.action;
+  const from = tx.from;
+  const batchId = getBatchIdFromBlock(block);
+  const to = tx.to || batchId;
   return (
     <motion.tr
       initial={{ opacity: 0, x: -8 }}
@@ -279,18 +329,18 @@ function BlockRow({ block, isGenesis, onClick }: { block: Block; isGenesis: bool
         <span className="font-mono text-xs text-gray-600 dark:text-gray-300">{block.hash.slice(0, 14)}…</span>
       </td>
       <td className="px-4 py-3 hidden md:table-cell">
-        {block.data?.batchID && (
-          <span className="font-mono text-xs bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded text-gray-700 dark:text-gray-300">{block.data.batchID}</span>
+        {batchId && (
+          <span className="font-mono text-xs bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded text-gray-700 dark:text-gray-300">{batchId}</span>
         )}
       </td>
       <td className="px-4 py-3 hidden lg:table-cell">
         {from && (
           <div className="flex items-center gap-1 text-xs">
-            <span className="font-mono bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded">{toAddress(from)}</span>
-            {to && to !== block.data?.batchID && (
+            <span className="bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded font-medium">{resolveCompanyName(from, companyByEmail)}</span>
+            {to && to !== batchId && (
               <>
                 <ArrowRight className="w-3 h-3 text-gray-400" />
-                <span className="font-mono bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 px-2 py-0.5 rounded">{toAddress(to)}</span>
+                <span className="bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 px-2 py-0.5 rounded font-medium">{resolveCompanyName(to, companyByEmail)}</span>
               </>
             )}
           </div>
@@ -305,12 +355,32 @@ function BlockRow({ block, isGenesis, onClick }: { block: Block; isGenesis: bool
 }
 
 /* ─────────────── Block Detail Panel ─────────────── */
-function BlockDetail({ block, onClose }: { block: Block; onClose: () => void }) {
+function BlockDetail({ block, chain, companyByEmail, onClose, onSelectBlock }: { block: Block; chain: Block[]; companyByEmail: Record<string, string>; onClose: () => void; onSelectBlock?: (block: Block) => void }) {
   const date = new Date(block.timestamp * 1000);
   const status = statusIndicator(block.data);
+  const batchId = getBatchIdFromBlock(block);
+  const tx = extractTransferFields(block.data);
+  const relatedChain = batchId
+    ? chain
+        .filter((b) => getBatchIdFromBlock(b).toLowerCase() === batchId.toLowerCase())
+        .sort((a, b) => a.index - b.index)
+    : [block];
+
+  const details = [
+    { label: 'Action', val: tx.action || 'DATA', mono: false },
+    { label: 'Batch ID', val: batchId || 'N/A', mono: true },
+    { label: 'From Company', val: resolveCompanyName(tx.from || 'N/A', companyByEmail), mono: false },
+    { label: 'To Company', val: resolveCompanyName(tx.to || 'N/A', companyByEmail), mono: false },
+    { label: 'Units', val: tx.units !== null ? String(tx.units) : 'N/A', mono: false },
+    { label: 'Route', val: tx.fromLocation || tx.toLocation ? `${tx.fromLocation || 'Unknown'} -> ${tx.toLocation || 'Unknown'}` : 'N/A', mono: false },
+    { label: 'Transfer ID', val: tx.transferId || 'N/A', mono: true },
+    { label: 'Payload Hash', val: tx.payloadHash || block.hash, mono: true },
+    { label: 'Signature', val: tx.signature || 'N/A', mono: true },
+  ];
+
   return (
     <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}
-      className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-xl p-6 space-y-4">
+      className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-xl p-6 sm:p-8 md:p-10 space-y-5 max-h-[94vh] overflow-y-auto">
       <div className="flex items-center justify-between">
         <h3 className="font-bold text-gray-900 dark:text-white flex items-center gap-2">
           <Database className="w-5 h-5 text-blue-500" /> Block #{block.index}
@@ -320,7 +390,7 @@ function BlockDetail({ block, onClose }: { block: Block; onClose: () => void }) 
       <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-semibold border ${status.color}`}>
         <status.icon className="w-3.5 h-3.5" /> {status.label}
       </span>
-      <div className="space-y-3">
+      <div className="space-y-4">
         {[
           { label: 'Hash', val: block.hash, mono: true },
           { label: 'Previous Hash', val: block.previous_hash, mono: true },
@@ -328,17 +398,75 @@ function BlockDetail({ block, onClose }: { block: Block; onClose: () => void }) 
         ].map(r => (
           <div key={r.label}>
             <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">{r.label}</p>
-            <p className={`text-xs break-all bg-gray-50 dark:bg-gray-900 rounded-lg px-3 py-2 ${r.mono ? 'font-mono' : ''} text-gray-700 dark:text-gray-300`}>{r.val}</p>
+            <p className={`text-xs sm:text-sm break-all bg-gray-50 dark:bg-gray-900 rounded-lg px-3 py-2 ${r.mono ? 'font-mono' : ''} text-gray-700 dark:text-gray-300`}>{r.val}</p>
           </div>
         ))}
+
         <div>
-          <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">Payload</p>
-          <pre className="text-xs font-mono bg-gray-50 dark:bg-gray-900 rounded-lg px-3 py-3 overflow-x-auto whitespace-pre-wrap break-all text-gray-700 dark:text-gray-300 max-h-48">
-            {typeof block.data === 'string' ? block.data : JSON.stringify(block.data, null, 2)}
-          </pre>
+          <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">Transaction Details</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+            {details.map((r) => (
+              <div key={r.label}>
+                <p className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">{r.label}</p>
+                <p className={`text-xs sm:text-sm break-all bg-gray-50 dark:bg-gray-900 rounded-lg px-3 py-2 ${r.mono ? 'font-mono' : ''} text-gray-700 dark:text-gray-300`}>{r.val}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-2">Transfer Chain</p>
+          <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+            {relatedChain.map((b) => {
+              const link = extractTransferFields(b.data);
+              const isActive = b.index === block.index;
+              return (
+                <button
+                  key={b.index}
+                  type="button"
+                  onClick={() => onSelectBlock?.(b)}
+                  className={`w-full text-left rounded-lg px-3 py-2 border transition-colors ${isActive ? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20' : 'border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-semibold text-gray-500 dark:text-gray-400">Block #{b.index}</span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${getActionBadge(link.action)}`}>{link.action}</span>
+                  </div>
+                  <p className="text-xs font-mono text-gray-700 dark:text-gray-300 mt-1 break-all">
+                    {`${resolveCompanyName(link.from || 'N/A', companyByEmail)} => ${resolveCompanyName(link.to || 'N/A', companyByEmail)}`}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
     </motion.div>
+  );
+}
+
+function BlockDetailModal({ block, chain, companyByEmail, onClose, onSelectBlock }: { block: Block; chain: Block[]; companyByEmail: Record<string, string>; onClose: () => void; onSelectBlock: (block: Block) => void }) {
+  return (
+    <AnimatePresence>
+      <motion.div
+        key="block-detail-modal"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 z-50 bg-black/45 backdrop-blur-sm p-2 sm:p-4 flex items-center justify-center"
+        onClick={onClose}
+      >
+        <motion.div
+          initial={{ opacity: 0, y: 20, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 20, scale: 0.98 }}
+          transition={{ duration: 0.18 }}
+          className="w-[98vw] sm:w-[95vw] max-w-[1400px]"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <BlockDetail block={block} chain={chain} companyByEmail={companyByEmail} onClose={onClose} onSelectBlock={onSelectBlock} />
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
   );
 }
 
@@ -346,6 +474,7 @@ function BlockDetail({ block, onClose }: { block: Block; onClose: () => void }) 
 export function BlockchainExplorer({ medicines }: BlockchainExplorerProps) {
   const { getToken } = useAuth();
   const [chain, setChain] = useState<Block[]>([]);
+  const [companyByEmail, setCompanyByEmail] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -375,6 +504,28 @@ export function BlockchainExplorer({ medicines }: BlockchainExplorerProps) {
   }, [getToken]);
 
   useEffect(() => { loadChain(); }, [loadChain]);
+
+  useEffect(() => {
+    const loadCompanies = async () => {
+      try {
+        const token = await getToken();
+        if (!token) return;
+        const response = await companiesAPI.list(token);
+        if (!response?.success || !Array.isArray(response.companies)) return;
+
+        const map: Record<string, string> = {};
+        response.companies.forEach((company: { email?: string; companyName?: string }) => {
+          if (!company.email || !company.companyName) return;
+          map[normalizeIdentity(company.email)] = company.companyName;
+        });
+        setCompanyByEmail(map);
+      } catch {
+        // Non-blocking: UI falls back to readable labels.
+      }
+    };
+
+    loadCompanies();
+  }, [getToken]);
 
   // Real-time polling via interval
   useEffect(() => {
@@ -479,9 +630,8 @@ export function BlockchainExplorer({ medicines }: BlockchainExplorerProps) {
             </select>
           </div>
 
-          {/* Block list + Detail panel */}
-          <div className={`flex gap-4 ${selectedBlock ? 'items-start' : ''}`}>
-            <div className="flex-1 min-w-0 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+          {/* Block list */}
+          <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 dark:bg-gray-900/50 border-b border-gray-100 dark:border-gray-700">
@@ -506,9 +656,11 @@ export function BlockchainExplorer({ medicines }: BlockchainExplorerProps) {
                           key={block.index}
                           block={block}
                           isGenesis={block.index === 0}
+                          companyByEmail={companyByEmail}
                           onClick={() => {
                             setSelectedBlock(prev => prev?.index === block.index ? null : block);
-                            if (block.data?.batchID) setTrackerBatchID(block.data.batchID);
+                            const batchId = getBatchIdFromBlock(block);
+                            if (batchId) setTrackerBatchID(batchId);
                           }}
                         />
                       ))
@@ -524,23 +676,23 @@ export function BlockchainExplorer({ medicines }: BlockchainExplorerProps) {
                   </button>
                 )}
               </div>
-            </div>
-
-            {/* Block detail panel */}
-            <AnimatePresence>
-              {selectedBlock && (
-                <div className="w-80 flex-shrink-0 hidden lg:block">
-                  <BlockDetail block={selectedBlock} onClose={() => setSelectedBlock(null)} />
-                </div>
-              )}
-            </AnimatePresence>
           </div>
+
+          {selectedBlock && (
+            <BlockDetailModal
+              block={selectedBlock}
+              chain={chain}
+              companyByEmail={companyByEmail}
+              onClose={() => setSelectedBlock(null)}
+              onSelectBlock={(block) => setSelectedBlock(block)}
+            />
+          )}
         </div>
       )}
 
       {/* Medicine Tracker Tab */}
       {activeTab === 'tracker' && (
-        <MedicineTracker chain={chain} medicines={medicines} initialBatchID={trackerBatchID} />
+        <MedicineTracker chain={chain} medicines={medicines} initialBatchID={trackerBatchID} companyByEmail={companyByEmail} />
       )}
     </div>
   );
