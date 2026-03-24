@@ -1,6 +1,5 @@
 require("dotenv").config();
 const express = require("express");
-const cors = require("cors");
 const mongoose = require("mongoose");
 const QRCode = require("qrcode");
 const crypto = require("crypto");
@@ -29,45 +28,75 @@ const app = express();
 const realtimeClients = new Map();
 
 // CORS configuration - allow multiple origins
+function normalizeOrigin(value) {
+  if (!value || typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  try {
+    return new URL(trimmed).origin;
+  } catch {
+    // Allow raw host-like values by attempting https first.
+    try {
+      return new URL(`https://${trimmed.replace(/^https?:\/\//i, "")}`).origin;
+    } catch {
+      return "";
+    }
+  }
+}
+
 const frontendEnvOrigins = [
   process.env.FRONTEND_URL,
   process.env.FRONTEND_APP_URL,
   process.env.VERCEL_FRONTEND_URL,
   ...(process.env.FRONTEND_URLS ? process.env.FRONTEND_URLS.split(",") : []),
 ]
-  .map((value) => (value || "").trim())
+  .map(normalizeOrigin)
   .filter(Boolean);
 
-const allowedOrigins = [
+const staticOrigins = [
   "http://localhost:5173",
   "http://127.0.0.1:5173",
   "http://10.9.5.204:5173",
-  ...frontendEnvOrigins,
 ];
 
-const corsOptions = {
-  origin(origin, callback) {
-    // Allow requests with no origin (e.g. curl, server-to-server checks)
-    if (!origin) return callback(null, true);
+const allowedOriginSet = new Set([
+  ...staticOrigins.map(normalizeOrigin).filter(Boolean),
+  ...frontendEnvOrigins,
+]);
 
-    const isAllowed = allowedOrigins.includes(origin);
-    const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+function isAllowedOrigin(origin) {
+  const normalized = normalizeOrigin(origin);
+  if (!normalized) return false;
+  if (allowedOriginSet.has(normalized)) return true;
 
-    if (isAllowed || (process.env.NODE_ENV !== "production" && isLocalhost)) {
-      return callback(null, true);
+  // Useful for Vercel preview/staging deployments.
+  if (/^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(normalized)) return true;
+
+  return false;
+}
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  const allowOrigin = origin && isAllowedOrigin(origin);
+
+  if (allowOrigin) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  }
+
+  if (req.method === "OPTIONS") {
+    if (allowOrigin || !origin) {
+      return res.sendStatus(204);
     }
+    console.warn(`⚠️  CORS preflight blocked origin: ${origin}`);
+    return res.status(403).json({ error: "Not allowed by CORS" });
+  }
 
-    console.warn(`⚠️  CORS blocked origin: ${origin}`);
-    return callback(new Error("Not allowed by CORS"));
-  },
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-  optionsSuccessStatus: 204,
-};
-
-app.use(cors(corsOptions));
-app.options("*", cors(corsOptions));
+  return next();
+});
 
 app.use(express.json({ limit: "8mb" }));
 // NoSQL injection protection
