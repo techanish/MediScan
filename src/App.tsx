@@ -67,8 +67,24 @@ export interface Medicine {
   updatedAt?: string;
 }
 
-const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+const RAW_API_BASE = (import.meta.env.VITE_API_URL || '').trim().replace(/\/$/, '');
 const APP_SYNC_FALLBACK_INTERVAL_MS = 30000;
+
+function getApiBase(): string {
+  if (!RAW_API_BASE) return '';
+  if (typeof window === 'undefined') return RAW_API_BASE;
+
+  const runningOnLocalHost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+  const pointsToLocalHost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(RAW_API_BASE);
+
+  // Safety: ignore localhost API URL in deployed environments.
+  if (!runningOnLocalHost && pointsToLocalHost) {
+    return '';
+  }
+  return RAW_API_BASE;
+}
+
+const API_BASE = getApiBase();
 
 function buildApiUrl(endpoint: string): string {
   return API_BASE ? `${API_BASE}${endpoint}` : endpoint;

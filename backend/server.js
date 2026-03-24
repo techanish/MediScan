@@ -29,27 +29,45 @@ const app = express();
 const realtimeClients = new Map();
 
 // CORS configuration - allow multiple origins
-const allowedOrigins = [
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-  'http://10.9.5.204:5173',
-  process.env.FRONTEND_URL
-].filter(Boolean);
+const frontendEnvOrigins = [
+  process.env.FRONTEND_URL,
+  process.env.FRONTEND_APP_URL,
+  process.env.VERCEL_FRONTEND_URL,
+  ...(process.env.FRONTEND_URLS ? process.env.FRONTEND_URLS.split(",") : []),
+]
+  .map((value) => (value || "").trim())
+  .filter(Boolean);
 
-app.use(cors({
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl)
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "http://10.9.5.204:5173",
+  ...frontendEnvOrigins,
+];
+
+const corsOptions = {
+  origin(origin, callback) {
+    // Allow requests with no origin (e.g. curl, server-to-server checks)
     if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      console.log(`⚠️  CORS blocked origin: ${origin}`);
-      callback(null, true); // Allow all in development
+
+    const isAllowed = allowedOrigins.includes(origin);
+    const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+
+    if (isAllowed || (process.env.NODE_ENV !== "production" && isLocalhost)) {
+      return callback(null, true);
     }
+
+    console.warn(`⚠️  CORS blocked origin: ${origin}`);
+    return callback(new Error("Not allowed by CORS"));
   },
-  credentials: true
-}));
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  optionsSuccessStatus: 204,
+};
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 
 app.use(express.json({ limit: "8mb" }));
 // NoSQL injection protection
@@ -229,11 +247,17 @@ app.get("/events/stream", async (req, res) => {
     }
 
     const clientId = crypto.randomUUID();
+    const requestOrigin = req.headers.origin;
 
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("Connection", "keep-alive");
     res.setHeader("X-Accel-Buffering", "no");
+    if (requestOrigin) {
+      res.setHeader("Access-Control-Allow-Origin", requestOrigin);
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+      res.setHeader("Vary", "Origin");
+    }
     res.flushHeaders?.();
 
     realtimeClients.set(clientId, {
