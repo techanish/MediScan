@@ -3,7 +3,14 @@
  * Handles all backend API communications
  */
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+
+function resolveApiUrl(endpoint: string): string {
+  if (!endpoint.startsWith('/')) {
+    throw new Error(`API endpoint must start with '/': ${endpoint}`);
+  }
+  return API_BASE ? `${API_BASE}${endpoint}` : endpoint;
+}
 
 /**
  * Generic fetch wrapper with error handling
@@ -12,7 +19,7 @@ async function fetchAPI<T = any>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const url = `${API_URL}${endpoint}`;
+  const url = resolveApiUrl(endpoint);
   
   let response: Response;
   try {
@@ -251,7 +258,13 @@ export const ticketAPI = {
    */
   create: async (
     sessionToken: string,
-    data: { title: string; description: string; category?: string; priority?: string }
+    data: {
+      title: string;
+      description: string;
+      category?: string;
+      priority?: string;
+      attachments?: Array<{ name: string; mimeType: string; size: number; dataUrl: string }>;
+    }
   ) => {
     return fetchAPI('/tickets', {
       method: 'POST',
@@ -272,7 +285,14 @@ export const ticketAPI = {
   /**
    * Add comment to ticket
    */
-  addComment: async (sessionToken: string, ticketId: string, data: { message: string }) => {
+  addComment: async (
+    sessionToken: string,
+    ticketId: string,
+    data: {
+      message?: string;
+      attachments?: Array<{ name: string; mimeType: string; size: number; dataUrl: string }>;
+    }
+  ) => {
     return fetchAPI(`/tickets/${ticketId}/comments`, {
       method: 'POST',
       headers: getAuthHeaders(sessionToken),

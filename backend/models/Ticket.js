@@ -1,12 +1,28 @@
 const mongoose = require("mongoose");
 
+const TicketAttachmentSchema = new mongoose.Schema(
+  {
+    name: { type: String, required: true, trim: true, maxlength: 120 },
+    mimeType: {
+      type: String,
+      required: true,
+      enum: ["image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"],
+    },
+    size: { type: Number, required: true, min: 1, max: 2 * 1024 * 1024 },
+    dataUrl: { type: String, required: true },
+    uploadedAt: { type: Date, default: Date.now },
+  },
+  { _id: false }
+);
+
 const TicketCommentSchema = new mongoose.Schema(
   {
     authorId: { type: String, required: true },
     authorEmail: { type: String, required: true },
     authorName: { type: String, default: "User" },
     authorRole: { type: String, default: "CUSTOMER" },
-    message: { type: String, required: true, trim: true, maxlength: 2000 },
+    message: { type: String, trim: true, maxlength: 2000, default: "" },
+    attachments: { type: [TicketAttachmentSchema], default: [] },
   },
   { _id: true, timestamps: true }
 );
@@ -35,6 +51,7 @@ const TicketSchema = new mongoose.Schema(
       email: { type: String, default: "" },
       name: { type: String, default: "" },
     },
+    attachments: { type: [TicketAttachmentSchema], default: [] },
     lastUpdatedAt: { type: Date, default: Date.now },
     comments: { type: [TicketCommentSchema], default: [] },
   },

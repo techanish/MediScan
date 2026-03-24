@@ -51,7 +51,7 @@ app.use(cors({
   credentials: true
 }));
 
-app.use(express.json());
+app.use(express.json({ limit: "8mb" }));
 // NoSQL injection protection
 app.use(mongoSanitize());
 
@@ -146,6 +146,60 @@ function publishRealtimeUpdate(eventType, payload = {}) {
       realtimeClients.delete(client.id);
     }
   }
+}
+
+const TICKET_ATTACHMENT_ALLOWED_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/jpg",
+  "image/webp",
+  "image/gif",
+]);
+const TICKET_ATTACHMENT_MAX_COUNT = 4;
+const TICKET_ATTACHMENT_MAX_SIZE = 2 * 1024 * 1024;
+
+function normalizeTicketAttachments(rawAttachments) {
+  if (!rawAttachments) return [];
+  if (!Array.isArray(rawAttachments)) {
+    throw new Error("Attachments must be an array");
+  }
+  if (rawAttachments.length > TICKET_ATTACHMENT_MAX_COUNT) {
+    throw new Error(`Maximum ${TICKET_ATTACHMENT_MAX_COUNT} images are allowed`);
+  }
+
+  return rawAttachments.map((attachment, index) => {
+    if (!attachment || typeof attachment !== "object") {
+      throw new Error(`Attachment ${index + 1} is invalid`);
+    }
+
+    const name = typeof attachment.name === "string" ? attachment.name.trim() : "";
+    const mimeType = typeof attachment.mimeType === "string" ? attachment.mimeType.trim().toLowerCase() : "";
+    const size = Number(attachment.size);
+    const dataUrl = typeof attachment.dataUrl === "string" ? attachment.dataUrl.trim() : "";
+
+    if (!name) {
+      throw new Error(`Attachment ${index + 1} name is required`);
+    }
+    if (!TICKET_ATTACHMENT_ALLOWED_TYPES.has(mimeType)) {
+      throw new Error(`Attachment ${index + 1} type is not supported`);
+    }
+    if (!Number.isFinite(size) || size <= 0 || size > TICKET_ATTACHMENT_MAX_SIZE) {
+      throw new Error(`Attachment ${index + 1} exceeds 2MB size limit`);
+    }
+
+    const dataUrlPattern = /^data:image\/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=]+$/;
+    if (!dataUrlPattern.test(dataUrl)) {
+      throw new Error(`Attachment ${index + 1} content is invalid`);
+    }
+
+    return {
+      name: name.slice(0, 120),
+      mimeType,
+      size,
+      dataUrl,
+      uploadedAt: new Date(),
+    };
+  });
 }
 
 // Realtime stream (SSE) for instant app updates
@@ -297,7 +351,13 @@ app.put("/auth/profile", clerkAuth, async (req, res) => {
 // Create a ticket (all authenticated users)
 app.post("/tickets", clerkAuth, async (req, res) => {
   try {
-    const { title, description, category, priority } = req.body || {};
+    const { title, description, category, priority, attachments: rawAttachments } = req.body || {};
+    let attachments = [];
+    try {
+      attachments = normalizeTicketAttachments(rawAttachments);
+    } catch (validationError) {
+      return res.status(400).json({ error: validationError.message });
+    }
 
     if (!title || !title.trim()) {
       return res.status(400).json({ error: "Ticket title is required" });
@@ -319,6 +379,7 @@ app.post("/tickets", clerkAuth, async (req, res) => {
         role: req.user.role,
         companyName: req.user.companyName || "",
       },
+      attachments,
       comments: [
         {
           authorId: req.user.id,
@@ -326,6 +387,7 @@ app.post("/tickets", clerkAuth, async (req, res) => {
           authorName: req.user.name,
           authorRole: req.user.role,
           message: "Ticket created",
+          attachments,
         },
       ],
       lastUpdatedAt: new Date(),
@@ -405,10 +467,17 @@ app.get("/tickets/:ticketId", clerkAuth, async (req, res) => {
 app.post("/tickets/:ticketId/comments", clerkAuth, async (req, res) => {
   try {
     const { ticketId } = req.params;
-    const { message } = req.body || {};
+    const { message, attachments: rawAttachments } = req.body || {};
+    let attachments = [];
+    try {
+      attachments = normalizeTicketAttachments(rawAttachments);
+    } catch (validationError) {
+      return res.status(400).json({ error: validationError.message });
+    }
+    const trimmedMessage = typeof message === "string" ? message.trim() : "";
 
-    if (!message || !message.trim()) {
-      return res.status(400).json({ error: "Comment message is required" });
+    if (!trimmedMessage && attachments.length === 0) {
+      return res.status(400).json({ error: "Comment message or image attachment is required" });
     }
 
     const ticket = await Ticket.findById(ticketId);
@@ -426,7 +495,8 @@ app.post("/tickets/:ticketId/comments", clerkAuth, async (req, res) => {
       authorEmail: req.user.email,
       authorName: req.user.name,
       authorRole: req.user.role,
-      message: message.trim(),
+      message: trimmedMessage,
+      attachments,
     });
     ticket.lastUpdatedAt = new Date();
     await ticket.save();

@@ -67,8 +67,12 @@ export interface Medicine {
   updatedAt?: string;
 }
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
 const APP_SYNC_FALLBACK_INTERVAL_MS = 30000;
+
+function buildApiUrl(endpoint: string): string {
+  return API_BASE ? `${API_BASE}${endpoint}` : endpoint;
+}
 
 function mapNotificationType(type: string, priority: string): 'ALERT' | 'INFO' | 'SUCCESS' | 'WARNING' {
   if (type === 'EXPIRY_ALERT' || type === 'LOW_STOCK') return 'WARNING';
@@ -162,7 +166,7 @@ function MediScanApp() {
     try {
       const token = await getToken();
       if (!token) return;
-      const response = await fetch(`${API_URL}/notifications`, {
+      const response = await fetch(buildApiUrl('/notifications'), {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await response.json();
@@ -245,7 +249,7 @@ function MediScanApp() {
         const token = await getToken();
         if (!token || stopped) return;
 
-        source = new EventSource(`${API_URL}/events/stream?token=${encodeURIComponent(token)}`);
+        source = new EventSource(`${buildApiUrl('/events/stream')}?token=${encodeURIComponent(token)}`);
 
         source.addEventListener('app-update', () => {
           window.dispatchEvent(new Event('mediscan:realtime-update'));
@@ -423,7 +427,7 @@ function MediScanApp() {
     try {
       const token = await getToken();
       if (!token) return;
-      await fetch(`${API_URL}/notifications/read-all`, {
+      await fetch(buildApiUrl('/notifications/read-all'), {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -437,7 +441,7 @@ function MediScanApp() {
     try {
       const token = await getToken();
       if (!token) return;
-      await fetch(`${API_URL}/notifications/${id}/read`, {
+      await fetch(buildApiUrl(`/notifications/${id}/read`), {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}` },
       });
