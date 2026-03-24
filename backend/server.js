@@ -20,6 +20,7 @@ const { filterMedicineByRole } = require("./utils/roleViews");
 
 // Blockchain integration
 const blockchain = require("./utils/blockchain");
+const BLOCKCHAIN_API_URL = (process.env.BLOCKCHAIN_API_URL || "http://localhost:5001").replace(/\/$/, "");
 
 // Constants
 const DEFAULT_CUSTOMER_EMAIL = "CUSTOMER";
@@ -637,7 +638,14 @@ app.post("/blockchain/add", clerkAuth, async (req, res) => {
     const block = await blockchain.addBlock(data);
     res.json({ success: true, block });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    const status = err?.response?.status || 503;
+    const details = err?.response?.data || err?.message || "Blockchain service unavailable";
+    console.error("❌ Blockchain add error:", details);
+    res.status(status).json({
+      error: "Blockchain service unavailable",
+      details,
+      blockchainApi: BLOCKCHAIN_API_URL,
+    });
   }
 });
 
@@ -647,7 +655,14 @@ app.get("/blockchain/chain", clerkAuth, async (req, res) => {
     const chain = await blockchain.getChain();
     res.json({ success: true, chain });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    const status = err?.response?.status || 503;
+    const details = err?.response?.data || err?.message || "Blockchain service unavailable";
+    console.error("❌ Blockchain chain error:", details);
+    res.status(status).json({
+      error: "Blockchain service unavailable",
+      details,
+      blockchainApi: BLOCKCHAIN_API_URL,
+    });
   }
 });
 
