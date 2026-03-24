@@ -328,12 +328,6 @@ function MediScanApp() {
         location: medicine.location,
       } as any);
       if (response.success) {
-        blockchainAPI.addBlock(token, {
-          action: 'REGISTER', batchID: medicine.batchID, name: medicine.name,
-          manufacturer: medicine.manufacturer, totalUnits: medicine.totalUnits,
-          manufacturerLocation: medicine.location,
-          registeredBy: user.email, timestamp: new Date().toISOString(),
-        }).catch(() => {});
         const listResponse = await medicineAPI.list(token, { owner: user.email });
         if (listResponse.success && listResponse.medicines) setMedicines(listResponse.medicines);
         return { success: true };
@@ -364,12 +358,6 @@ function MediScanApp() {
         toLocation,
       });
       if (response.success) {
-        blockchainAPI.addBlock(token, {
-          action: 'TRANSFER', batchID, from: user.email, to: newOwnerEmail,
-          fromLocation,
-          toLocation,
-          toRole: newOwnerRole, unitsTransferred: unitsToTransfer, timestamp: new Date().toISOString(),
-        }).catch(() => {});
         const filters = user.role !== 'CUSTOMER' ? { owner: user.email } : {};
         const listResponse = await medicineAPI.list(token, filters);
         if (listResponse.success && listResponse.medicines) setMedicines(listResponse.medicines);

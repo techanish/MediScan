@@ -2,13 +2,41 @@
 const axios = require('axios');
 const crypto = require('crypto');
 
-const BLOCKCHAIN_API = (process.env.BLOCKCHAIN_API_URL || 'http://localhost:5001').replace(/\/$/, '');
 const BLOCKCHAIN_TIMEOUT_MS = Number(process.env.BLOCKCHAIN_TIMEOUT_MS || 15000);
+const BLOCKCHAIN_API_URLS = (() => {
+  const primary = (process.env.BLOCKCHAIN_API_URL || '').trim();
+  const fallback = (process.env.BLOCKCHAIN_API_FALLBACK_URL || '').trim();
+  const list = (process.env.BLOCKCHAIN_API_URLS || '').trim();
 
-const blockchainClient = axios.create({
-  baseURL: BLOCKCHAIN_API,
-  timeout: Number.isFinite(BLOCKCHAIN_TIMEOUT_MS) ? BLOCKCHAIN_TIMEOUT_MS : 15000,
-});
+  const candidates = [
+    ...list.split(',').map((url) => url.trim()).filter(Boolean),
+    primary,
+    fallback,
+  ].filter(Boolean);
+
+  if (candidates.length === 0) {
+    candidates.push('http://localhost:5001');
+  }
+
+  // Ensure localhost stays first when explicitly configured while preserving order.
+  const normalized = candidates.map((url) => url.replace(/\/$/, '')).filter(Boolean);
+  return [...new Set(normalized)];
+})();
+
+const clientCache = new Map();
+
+function getClient(baseURL) {
+  if (!clientCache.has(baseURL)) {
+    clientCache.set(
+      baseURL,
+      axios.create({
+        baseURL,
+        timeout: Number.isFinite(BLOCKCHAIN_TIMEOUT_MS) ? BLOCKCHAIN_TIMEOUT_MS : 15000,
+      })
+    );
+  }
+  return clientCache.get(baseURL);
+}
 
 // Embedded fallback chain for environments where the Python microservice is not running.
 const embeddedChain = [
@@ -60,13 +88,34 @@ function shouldFallback(err) {
   ].includes(code) || status >= 500;
 }
 
+async function requestWithFailover(executor) {
+  let lastRecoverableError = null;
+
+  for (const apiBaseUrl of BLOCKCHAIN_API_URLS) {
+    try {
+      const client = getClient(apiBaseUrl);
+      return await executor(client, apiBaseUrl);
+    } catch (err) {
+      if (!shouldFallback(err)) {
+        throw err;
+      }
+      lastRecoverableError = err;
+      console.warn(`⚠️ Blockchain API unavailable at ${apiBaseUrl}. Trying next endpoint...`);
+    }
+  }
+
+  throw lastRecoverableError || new Error('No blockchain endpoints configured');
+}
+
 async function addBlock(data) {
   try {
-    const res = await blockchainClient.post('/add_block', { data });
+    const res = await requestWithFailover((client) => client.post('/add_block', { data }));
     return res.data;
   } catch (err) {
     if (shouldFallback(err)) {
-      console.warn(`⚠️ Blockchain microservice unavailable at ${BLOCKCHAIN_API}. Using embedded blockchain fallback.`);
+      console.warn(
+        `⚠️ Blockchain microservice unavailable at all configured endpoints (${BLOCKCHAIN_API_URLS.join(', ')}). Using embedded blockchain fallback.`
+      );
       return addEmbeddedBlock(data);
     }
     throw err;
@@ -75,11 +124,13 @@ async function addBlock(data) {
 
 async function getChain() {
   try {
-    const res = await blockchainClient.get('/chain');
+    const res = await requestWithFailover((client) => client.get('/chain'));
     return res.data;
   } catch (err) {
     if (shouldFallback(err)) {
-      console.warn(`⚠️ Blockchain microservice unavailable at ${BLOCKCHAIN_API}. Returning embedded blockchain fallback.`);
+      console.warn(
+        `⚠️ Blockchain microservice unavailable at all configured endpoints (${BLOCKCHAIN_API_URLS.join(', ')}). Returning embedded blockchain fallback.`
+      );
       return getEmbeddedChain();
     }
     throw err;

@@ -20,7 +20,17 @@ const { filterMedicineByRole } = require("./utils/roleViews");
 
 // Blockchain integration
 const blockchain = require("./utils/blockchain");
-const BLOCKCHAIN_API_URL = (process.env.BLOCKCHAIN_API_URL || "http://localhost:5001").replace(/\/$/, "");
+const BLOCKCHAIN_API_TARGETS = (() => {
+  const primary = (process.env.BLOCKCHAIN_API_URL || "").trim();
+  const fallback = (process.env.BLOCKCHAIN_API_FALLBACK_URL || "").trim();
+  const list = (process.env.BLOCKCHAIN_API_URLS || "").trim();
+  const endpoints = [
+    ...list.split(",").map((url) => url.trim()).filter(Boolean),
+    primary,
+    fallback,
+  ].filter(Boolean);
+  return [...new Set((endpoints.length ? endpoints : ["http://localhost:5001"]).map((url) => url.replace(/\/$/, "")).filter(Boolean))];
+})();
 
 // Constants
 const DEFAULT_CUSTOMER_EMAIL = "CUSTOMER";
@@ -644,7 +654,7 @@ app.post("/blockchain/add", clerkAuth, async (req, res) => {
     res.status(status).json({
       error: "Blockchain service unavailable",
       details,
-      blockchainApi: BLOCKCHAIN_API_URL,
+      blockchainApi: BLOCKCHAIN_API_TARGETS.join(", "),
     });
   }
 });
@@ -661,7 +671,7 @@ app.get("/blockchain/chain", clerkAuth, async (req, res) => {
     res.status(status).json({
       error: "Blockchain service unavailable",
       details,
-      blockchainApi: BLOCKCHAIN_API_URL,
+      blockchainApi: BLOCKCHAIN_API_TARGETS.join(", "),
     });
   }
 });
@@ -1328,6 +1338,61 @@ app.post("/medicine/register",
       const exists = await Medicine.findOne({ batchID });
       if (exists) return res.status(400).json({ error: "Batch already registered" });
 
+      const registerTime = new Date();
+      const registerId = `reg_${crypto.randomUUID()}`;
+      const registerNonce = crypto.randomBytes(16).toString("hex");
+      const initiatedByIp = getClientIp(req);
+      const initiatedByUserAgent = req.get("user-agent") || "UNKNOWN";
+
+      const canonicalRegisterPayload = {
+        eventType: "MEDICINE_REGISTER",
+        version: "1.0",
+        registerId,
+        batchID,
+        medicineName: name,
+        manufacturer,
+        registeredBy: req.user.email,
+        registeredByRole: req.user.role,
+        totalUnits: units,
+        manufacturerLocation: manufacturerLocation || location || "",
+        mfgDate,
+        expDate,
+        registerTime: registerTime.toISOString(),
+        registerNonce,
+        initiatedByIp,
+        initiatedByUserAgent
+      };
+
+      const transferPayloadHash = crypto
+        .createHash("sha256")
+        .update(JSON.stringify(canonicalRegisterPayload))
+        .digest("hex");
+
+      const transferSignature = crypto
+        .createHmac(
+          "sha256",
+          process.env.BLOCKCHAIN_EVENT_SECRET || process.env.QR_SECRET || "mediscan-transfer-signing-key"
+        )
+        .update(transferPayloadHash)
+        .digest("hex");
+
+      let blockchainBlock;
+      try {
+        blockchainBlock = await blockchain.addBlock({
+          action: "REGISTER",
+          ...canonicalRegisterPayload,
+          transferPayloadHash,
+          transferSignature
+        });
+      } catch (blockchainErr) {
+        console.error("❌ Blockchain write failed. Registration aborted:", blockchainErr.message);
+        return res.status(502).json({
+          error: "Blockchain service unavailable. Registration was not saved to keep ledger and database in sync."
+        });
+      }
+
+      const blockchainTimestamp = parseBlockchainTimestamp(blockchainBlock.timestamp, registerTime);
+
       const med = await Medicine.create({
         batchID,
         name,
@@ -1352,7 +1417,18 @@ app.post("/medicine/register",
             role: req.user.role,
             ownerLocation: manufacturerLocation || location || "",
             action: "REGISTERED",
-            unitsPurchased: 0
+            unitsPurchased: 0,
+            transferId: registerId,
+            transferNonce: registerNonce,
+            transferPayloadHash,
+            transferSignature,
+            initiatedByIp,
+            initiatedByUserAgent,
+            blockchainStatus: "CONFIRMED",
+            blockchainIndex: blockchainBlock.index,
+            blockchainHash: blockchainBlock.hash || "",
+            blockchainPreviousHash: blockchainBlock.previous_hash || "",
+            blockchainTimestamp
           }
         ]
       });
@@ -1372,7 +1448,15 @@ app.post("/medicine/register",
       res.status(201).json({ 
         success: true,
         message: "✅ Medicine Registered", 
-        medicine: med 
+        medicine: med,
+        blockchain: {
+          status: "CONFIRMED",
+          registerId,
+          blockIndex: blockchainBlock.index,
+          blockHash: blockchainBlock.hash,
+          previousHash: blockchainBlock.previous_hash,
+          blockTimestamp: blockchainTimestamp
+        }
       });
     } catch (err) {
       res.status(500).json({ error: err.message });
