@@ -1,6 +1,7 @@
 // Utility to interact with the blockchain microservice
 const axios = require('axios');
 const crypto = require('crypto');
+const BlockchainBlock = require('../models/BlockchainBlock');
 
 const BLOCKCHAIN_TIMEOUT_MS = Number(process.env.BLOCKCHAIN_TIMEOUT_MS || 15000);
 const BLOCKCHAIN_API_URLS = (() => {
@@ -38,16 +39,12 @@ function getClient(baseURL) {
   return clientCache.get(baseURL);
 }
 
-// Embedded fallback chain for environments where the Python microservice is not running.
-const embeddedChain = [
-  {
-    index: 0,
-    timestamp: Date.now(),
-    data: 'Genesis Block',
-    previous_hash: '0',
-    hash: '0',
-  },
-];
+const GENESIS_BLOCK = Object.freeze({
+  index: 0,
+  data: 'Genesis Block',
+  previous_hash: '0',
+  hash: '0',
+});
 
 function computeBlockHash(block) {
   const payload = JSON.stringify({
@@ -59,21 +56,141 @@ function computeBlockHash(block) {
   return crypto.createHash('sha256').update(payload).digest('hex');
 }
 
-function addEmbeddedBlock(data) {
-  const previous = embeddedChain[embeddedChain.length - 1];
-  const next = {
-    index: embeddedChain.length,
-    timestamp: Date.now(),
-    data,
-    previous_hash: previous.hash,
+function toBlockShape(blockDoc) {
+  return {
+    index: blockDoc.index,
+    timestamp: blockDoc.timestamp,
+    data: blockDoc.data,
+    previous_hash: blockDoc.previous_hash,
+    hash: blockDoc.hash,
   };
-  next.hash = computeBlockHash(next);
-  embeddedChain.push(next);
-  return next;
 }
 
-function getEmbeddedChain() {
-  return embeddedChain;
+function normalizeServiceHash(value) {
+  if (typeof value !== 'string') return '';
+  return value.trim();
+}
+
+function normalizeServiceIndex(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeServiceTimestamp(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isServiceGenesisBlock(block) {
+  return (
+    normalizeServiceIndex(block?.index) === 0 &&
+    block?.previous_hash === '0' &&
+    block?.data === 'Genesis Block'
+  );
+}
+
+async function ensureGenesisBlock() {
+  const existingGenesis = await BlockchainBlock.findOne({ index: 0 }).lean();
+  if (existingGenesis) {
+    return existingGenesis;
+  }
+
+  return BlockchainBlock.findOneAndUpdate(
+    { index: 0 },
+    {
+      $setOnInsert: {
+        ...GENESIS_BLOCK,
+        timestamp: Date.now(),
+      },
+    },
+    {
+      upsert: true,
+      new: true,
+      setDefaultsOnInsert: true,
+    }
+  ).lean();
+}
+
+async function appendDbBlock(data, metadata = {}) {
+  await ensureGenesisBlock();
+
+  const serviceHash = normalizeServiceHash(metadata.service_hash || metadata.hash || '');
+  if (serviceHash) {
+    const existing = await BlockchainBlock.findOne({ service_hash: serviceHash }).lean();
+    if (existing) {
+      return toBlockShape(existing);
+    }
+  }
+
+  for (let retryCount = 0; retryCount < 3; retryCount += 1) {
+    const previous = await BlockchainBlock.findOne().sort({ index: -1 }).lean();
+    const previousBlock = previous || (await ensureGenesisBlock());
+
+    const next = {
+      index: previousBlock.index + 1,
+      timestamp: Date.now(),
+      data,
+      previous_hash: previousBlock.hash,
+    };
+    next.hash = computeBlockHash(next);
+
+    if (serviceHash) {
+      next.source = metadata.source || 'python-service';
+      next.service_hash = serviceHash;
+      next.service_index = normalizeServiceIndex(metadata.service_index ?? metadata.index);
+      next.service_timestamp = normalizeServiceTimestamp(metadata.service_timestamp ?? metadata.timestamp);
+    } else {
+      next.source = metadata.source || 'embedded-fallback';
+    }
+
+    try {
+      const created = await BlockchainBlock.create(next);
+      return toBlockShape(created.toObject());
+    } catch (err) {
+      // Duplicate index/hash can happen during concurrent writes; retry with latest tail.
+      if (err?.code === 11000 && serviceHash) {
+        const existing = await BlockchainBlock.findOne({ service_hash: serviceHash }).lean();
+        if (existing) {
+          return toBlockShape(existing);
+        }
+      }
+      if (err?.code === 11000) {
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  throw new Error('Failed to append blockchain block after retries');
+}
+
+async function addEmbeddedBlock(data) {
+  return appendDbBlock(data, { source: 'embedded-fallback' });
+}
+
+async function syncServiceChainToDb(chain) {
+  if (!Array.isArray(chain) || chain.length === 0) {
+    return;
+  }
+
+  for (const block of chain) {
+    if (!block || isServiceGenesisBlock(block)) {
+      continue;
+    }
+
+    await appendDbBlock(block.data, {
+      source: 'python-service',
+      service_hash: block.hash,
+      service_index: block.index,
+      service_timestamp: block.timestamp,
+    });
+  }
+}
+
+async function getEmbeddedChain() {
+  await ensureGenesisBlock();
+  const chain = await BlockchainBlock.find().sort({ index: 1 }).lean();
+  return chain.map(toBlockShape);
 }
 
 function shouldFallback(err) {
@@ -110,13 +227,18 @@ async function requestWithFailover(executor) {
 async function addBlock(data) {
   try {
     const res = await requestWithFailover((client) => client.post('/add_block', { data }));
-    return res.data;
+    return await appendDbBlock(data, {
+      source: 'python-service',
+      service_hash: res?.data?.hash,
+      service_index: res?.data?.index,
+      service_timestamp: res?.data?.timestamp,
+    });
   } catch (err) {
     if (shouldFallback(err)) {
       console.warn(
         `⚠️ Blockchain microservice unavailable at all configured endpoints (${BLOCKCHAIN_API_URLS.join(', ')}). Using embedded blockchain fallback.`
       );
-      return addEmbeddedBlock(data);
+      return await addEmbeddedBlock(data);
     }
     throw err;
   }
@@ -125,13 +247,14 @@ async function addBlock(data) {
 async function getChain() {
   try {
     const res = await requestWithFailover((client) => client.get('/chain'));
-    return res.data;
+    await syncServiceChainToDb(res.data);
+    return await getEmbeddedChain();
   } catch (err) {
     if (shouldFallback(err)) {
       console.warn(
         `⚠️ Blockchain microservice unavailable at all configured endpoints (${BLOCKCHAIN_API_URLS.join(', ')}). Returning embedded blockchain fallback.`
       );
-      return getEmbeddedChain();
+      return await getEmbeddedChain();
     }
     throw err;
   }
