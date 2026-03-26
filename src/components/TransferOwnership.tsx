@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Truck, AlertCircle, CheckCircle } from 'lucide-react';
 import type { Medicine } from '../App';
 import { companiesAPI } from '../utils/api';
+import { getAvailableUnits } from '../utils/units';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -31,31 +32,6 @@ interface Company {
   companyName: string;
   role: string;
 }
-
-const getAvailableUnits = (medicine: Medicine, userEmail?: string): number => {
-  if (!userEmail) return medicine.remainingUnits || 0;
-
-  let receivedUnits = 0;
-  let transferredOutUnits = 0;
-  let soldUnits = 0;
-
-  medicine.ownerHistory.forEach(h => {
-    if (h.action === 'REGISTERED' && h.owner.toLowerCase() === userEmail.toLowerCase()) {
-      receivedUnits += medicine.totalUnits || 0;
-    }
-    if (h.action === 'TRANSFERRED' && h.owner.toLowerCase() === userEmail.toLowerCase() && h.unitsPurchased) {
-      receivedUnits += h.unitsPurchased;
-    }
-    if (h.action === 'TRANSFERRED' && (h as any).from?.toLowerCase() === userEmail.toLowerCase() && h.unitsPurchased) {
-      transferredOutUnits += h.unitsPurchased;
-    }
-    if (h.action === 'PURCHASED' && (h as any).from?.toLowerCase() === userEmail.toLowerCase() && h.unitsPurchased) {
-      soldUnits += h.unitsPurchased;
-    }
-  });
-
-  return receivedUnits - transferredOutUnits - soldUnits;
-};
 
 export function TransferOwnership({ medicines, getToken, onTransfer, userEmail }: TransferOwnershipProps) {
   const [selectedBatch, setSelectedBatch] = useState('');

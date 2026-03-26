@@ -1,6 +1,7 @@
 import React from 'react';
 import type { Medicine, User } from '../App';
 import { StatDetailsModal } from './StatDetailsModal';
+import { getMedicineUnitSummary } from '../utils/units';
 import { Package, Truck, AlertTriangle, TrendingUp, TrendingDown, Activity, CheckCircle, ShieldCheck, IndianRupee, PieChart as PieChartIcon, BarChart3, Clock } from 'lucide-react';
 import { motion } from 'framer-motion';
 import {
@@ -31,10 +32,25 @@ export function formatDate(dateStr: string | undefined): string {
 export function Dashboard({ medicines, user }: DashboardProps) {
   const [selectedStat, setSelectedStat] = React.useState<'value' | 'units' | 'alerts' | 'batches' | null>(null);
 
-  const activeBatches = medicines.filter(m => m.status === 'ACTIVE' || m.status === 'LOW_STOCK').length;
-  const totalUnits = medicines.reduce((acc, m) => acc + (m.remainingUnits || 0), 0);
-  const totalCapacity = medicines.reduce((acc, m) => acc + (m.totalUnits || 0), 0);
-  const totalValue = medicines.reduce((acc, m) => acc + ((m.remainingUnits || 0) * (m.price || 0)), 0);
+  const medicineUnitRows = React.useMemo(() => {
+    return medicines.map((medicine) => ({
+      medicine,
+      summary: getMedicineUnitSummary(medicine, user.email),
+    }));
+  }, [medicines, user.email]);
+
+  const scopedMedicines = React.useMemo(() => {
+    return medicineUnitRows.map(({ medicine, summary }) => ({
+      ...medicine,
+      totalUnits: summary.receivedUnits || medicine.totalUnits,
+      remainingUnits: summary.availableUnits,
+    }));
+  }, [medicineUnitRows]);
+
+  const activeBatches = medicineUnitRows.filter(({ medicine, summary }) => (medicine.status === 'ACTIVE' || medicine.status === 'LOW_STOCK') && summary.availableUnits > 0).length;
+  const totalUnits = medicineUnitRows.reduce((acc, row) => acc + row.summary.availableUnits, 0);
+  const totalCapacity = medicineUnitRows.reduce((acc, row) => acc + row.summary.receivedUnits, 0);
+  const totalValue = medicineUnitRows.reduce((acc, row) => acc + (row.summary.availableUnits * (row.medicine.price || 0)), 0);
   const expiredCount = medicines.filter(m => m.status === 'EXPIRED').length;
   const lowStockCount = medicines.filter(m => m.status === 'LOW_STOCK').length;
 
@@ -66,13 +82,13 @@ export function Dashboard({ medicines, user }: DashboardProps) {
     return acc;
   }, []);
 
-  const stockData = medicines
-    .filter(m => m.status === 'ACTIVE' || m.status === 'LOW_STOCK')
+  const stockData = medicineUnitRows
+    .filter(({ medicine, summary }) => (medicine.status === 'ACTIVE' || medicine.status === 'LOW_STOCK') && summary.availableUnits > 0)
     .slice(0, 5)
-    .map(m => ({
-      name: m.name.split(' ')[0],
-      remaining: m.remainingUnits || 0,
-      total: m.totalUnits
+    .map(({ medicine, summary }) => ({
+      name: medicine.name.split(' ')[0],
+      remaining: summary.availableUnits,
+      total: summary.receivedUnits || medicine.totalUnits
     }));
 
   const stats = [
@@ -177,7 +193,7 @@ export function Dashboard({ medicines, user }: DashboardProps) {
         isOpen={!!selectedStat}
         onClose={() => setSelectedStat(null)}
         type={selectedStat}
-        medicines={medicines}
+        medicines={scopedMedicines}
       />
 
       {/* Analytics Charts Row */}

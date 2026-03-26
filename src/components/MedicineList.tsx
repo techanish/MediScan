@@ -4,6 +4,7 @@ import { Search, AlertCircle, CheckCircle, Package, Download, Trash2, AlertTrian
 import { toast } from 'sonner';
 import { MedicineDetailsModal } from './MedicineDetailsModal';
 import { formatDate } from './Dashboard';
+import { getAvailableUnits } from '../utils/units';
 import {
   Select,
   SelectContent,
@@ -16,11 +17,12 @@ interface MedicineListProps {
   medicines: Medicine[];
   onNavigate?: (tab: string) => void;
   isLoading?: boolean;
+  userEmail?: string;
 }
 
 const PAGE_SIZE = 10;
 
-export function MedicineList({ medicines, onNavigate, isLoading }: MedicineListProps) {
+export function MedicineList({ medicines, onNavigate, isLoading, userEmail }: MedicineListProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
@@ -55,9 +57,17 @@ export function MedicineList({ medicines, onNavigate, isLoading }: MedicineListP
 
   const handleExport = () => {
     if (filteredMedicines.length === 0) return;
-    const dataToExport = filteredMedicines.map(({ batchID, name, manufacturer, totalUnits, remainingUnits, status, category, price, mfgDate, expDate }) => ({
-      batchID, name, manufacturer, totalUnits, remainingUnits, status, category, price,
-      mfgDate: formatDate(mfgDate), expDate: formatDate(expDate)
+    const dataToExport = filteredMedicines.map((item) => ({
+      batchID: item.batchID,
+      name: item.name,
+      manufacturer: item.manufacturer,
+      totalUnits: item.totalUnits,
+      availableUnits: getAvailableUnits(item, userEmail),
+      status: item.status,
+      category: item.category,
+      price: item.price,
+      mfgDate: formatDate(item.mfgDate),
+      expDate: formatDate(item.expDate),
     }));
     const headers = Object.keys(dataToExport[0]).join(',');
     const rows = dataToExport.map(row => Object.values(row).map(v => `"${v ?? ''}"`).join(','));
@@ -175,47 +185,50 @@ export function MedicineList({ medicines, onNavigate, isLoading }: MedicineListP
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50 dark:divide-gray-700">
-              {paginatedMedicines.map((item) => (
-                <tr key={item.batchID} onClick={() => setViewingMedicine(item)}
-                  className={`hover:bg-gray-50/50 dark:hover:bg-gray-700/50 transition-colors cursor-pointer ${selectedItems.includes(item.batchID) ? 'bg-emerald-50/30 dark:bg-emerald-900/10' : ''}`}>
-                  <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
-                    <input type="checkbox" checked={selectedItems.includes(item.batchID)} onChange={() => handleSelectItem(item.batchID)}
-                      className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 dark:bg-gray-700 dark:border-gray-600" />
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-gray-500 dark:text-gray-400 shrink-0">
-                        <Package className="w-5 h-5" />
+              {paginatedMedicines.map((item) => {
+                const availableUnits = getAvailableUnits(item, userEmail);
+                return (
+                  <tr key={item.batchID} onClick={() => setViewingMedicine(item)}
+                    className={`hover:bg-gray-50/50 dark:hover:bg-gray-700/50 transition-colors cursor-pointer ${selectedItems.includes(item.batchID) ? 'bg-emerald-50/30 dark:bg-emerald-900/10' : ''}`}>
+                    <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
+                      <input type="checkbox" checked={selectedItems.includes(item.batchID)} onChange={() => handleSelectItem(item.batchID)}
+                        className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 dark:bg-gray-700 dark:border-gray-600" />
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-gray-500 dark:text-gray-400 shrink-0">
+                          <Package className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="font-medium text-gray-900 dark:text-white">{item.name}</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400 font-mono mt-0.5">{item.batchID}</div>
+                        </div>
                       </div>
-                      <div>
-                        <div className="font-medium text-gray-900 dark:text-white">{item.name}</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400 font-mono mt-0.5">{item.batchID}</div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="inline-flex px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded text-xs font-medium">
+                        {item.category || 'Uncategorized'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex flex-col">
+                        <span className="font-medium text-gray-900 dark:text-white">{availableUnits} units</span>
+                        <span className="text-xs text-gray-500 dark:text-gray-400">₹{item.price?.toFixed(2) ?? '0.00'}/unit</span>
                       </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className="inline-flex px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded text-xs font-medium">
-                      {item.category || 'Uncategorized'}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex flex-col">
-                      <span className="font-medium text-gray-900 dark:text-white">{item.remainingUnits ?? '—'} units</span>
-                      <span className="text-xs text-gray-500 dark:text-gray-400">₹{item.price?.toFixed(2) ?? '0.00'}/unit</span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 text-gray-600 dark:text-gray-300 text-sm">
-                    {formatDate(item.expDate)}
-                  </td>
-                  <td className="px-6 py-4">
-                    {item.status === 'ACTIVE' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/30"><CheckCircle className="w-3 h-3" /> Active</span>}
-                    {item.status === 'LOW_STOCK' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 border border-amber-100 dark:border-amber-900/30"><AlertTriangle className="w-3 h-3" /> Low Stock</span>}
-                    {item.status === 'EXPIRED' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border border-red-100 dark:border-red-900/30"><AlertCircle className="w-3 h-3" /> Expired</span>}
-                    {item.status === 'RECALLED' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border border-red-100 dark:border-red-900/30"><AlertCircle className="w-3 h-3" /> Recalled</span>}
-                    {!item.status && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-400"><Eye className="w-3 h-3" /> Unknown</span>}
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td className="px-6 py-4 text-gray-600 dark:text-gray-300 text-sm">
+                      {formatDate(item.expDate)}
+                    </td>
+                    <td className="px-6 py-4">
+                      {item.status === 'ACTIVE' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/30"><CheckCircle className="w-3 h-3" /> Active</span>}
+                      {item.status === 'LOW_STOCK' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 border border-amber-100 dark:border-amber-900/30"><AlertTriangle className="w-3 h-3" /> Low Stock</span>}
+                      {item.status === 'EXPIRED' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border border-red-100 dark:border-red-900/30"><AlertCircle className="w-3 h-3" /> Expired</span>}
+                      {item.status === 'RECALLED' && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border border-red-100 dark:border-red-900/30"><AlertCircle className="w-3 h-3" /> Recalled</span>}
+                      {!item.status && <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-400"><Eye className="w-3 h-3" /> Unknown</span>}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

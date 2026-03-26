@@ -654,7 +654,7 @@ function MediScanApp() {
       case 'dashboard':
         return <Dashboard medicines={medicines} user={user} />;
       case 'inventory':
-        return <MedicineList medicines={medicines} onNavigate={setActiveTab} isLoading={isLoadingMedicines} />;
+        return <MedicineList medicines={medicines} onNavigate={setActiveTab} isLoading={isLoadingMedicines} userEmail={user.email} />;
       case 'register':
         return <RegisterMedicine onRegister={handleRegisterMedicine} />;
       case 'verify':
