@@ -328,7 +328,7 @@ export function VerifyMedicine({ medicines, onVerify }: VerifyMedicineProps) {
           <ShieldCheck className="w-8 h-8" />
         </div>
         <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">Verify Medicine Authenticity</h2>
-        <p className="text-gray-500 dark:text-gray-400">Enter the Batch ID to trace the product.</p>
+        <p className="text-gray-500 dark:text-gray-400">Enter Batch ID, Transaction ID, or Registered Hash to trace the product.</p>
       </div>
 
       <div className="relative mb-12">
@@ -337,7 +337,7 @@ export function VerifyMedicine({ medicines, onVerify }: VerifyMedicineProps) {
             type="text"
             value={batchId}
             onChange={e => setBatchId(e.target.value)}
-            placeholder="Enter Batch ID or paste QR payload"
+            placeholder="Enter Batch ID / TXN ID / Registered Hash or paste QR payload"
             className="w-full pl-6 pr-48 py-4 rounded-2xl bg-white dark:bg-gray-800 border-2 border-gray-100 dark:border-gray-700 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 text-lg shadow-xl shadow-gray-200/50 dark:shadow-gray-900/50 transition-all text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500"
           />
           <div className="absolute right-2 top-2 bottom-2 flex gap-2">
@@ -363,6 +363,9 @@ export function VerifyMedicine({ medicines, onVerify }: VerifyMedicineProps) {
             </button>
           </div>
         </form>
+        <p className="mt-3 px-2 text-xs text-gray-500 dark:text-gray-400">
+          Accepted inputs: Batch ID (for example BATCH-001), Transaction ID (TXN-...), Registered Hash (64-char), or scanned QR payload.
+        </p>
       </div>
 
       <AnimatePresence>
@@ -499,7 +502,7 @@ export function VerifyMedicine({ medicines, onVerify }: VerifyMedicineProps) {
                     {result.ownerHistory.map((history, idx) => (
                       <div key={idx} className="relative flex items-start gap-4">
                         <div className={`relative z-10 w-3 h-3 rounded-full border-2 border-white dark:border-gray-800 mt-1.5 ${
-                          idx === result.ownerHistory.length - 1 ? 'bg-emerald-500 ring-4 ring-emerald-100 dark:ring-emerald-900/30' : 'bg-gray-300 dark:bg-gray-600'
+                          idx === result.ownerHistory.length - 1 ? 'bg-emerald-500 ring-4 ring-emerald-100 dark:ring-emerald-900/30' : 'bg-slate-300 dark:bg-slate-500'
                         }`} />
                         <div>
                           <p className="text-sm font-bold text-gray-900 dark:text-gray-100">

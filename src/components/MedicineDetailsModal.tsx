@@ -1,22 +1,219 @@
+import { useEffect, useMemo, useState } from 'react';
 import type { Medicine } from '../App';
 import { X, Calendar, MapPin, Package, ShieldCheck, Activity, FileText, Clock, Printer, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
+import { printMedicineLabel } from '../utils/printLabel';
 
 interface MedicineDetailsModalProps {
   medicine: Medicine | null;
   onClose: () => void;
 }
 
+const formatEventTime = (value?: string): string => {
+  if (!value) return 'Unknown time';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString('en-IN');
+};
+
 export function MedicineDetailsModal({ medicine, onClose }: MedicineDetailsModalProps) {
+  const [showFullTimeline, setShowFullTimeline] = useState(false);
+  const [isPrintingLabel, setIsPrintingLabel] = useState(false);
+  const [isDownloadingReport, setIsDownloadingReport] = useState(false);
+
+  const ownerHistory = medicine?.ownerHistory ?? [];
+
+  const timelineEntries = useMemo(() => {
+    const entries = [...ownerHistory];
+    entries.sort((a, b) => {
+      const aTime = new Date(a.date || a.time || '').getTime();
+      const bTime = new Date(b.date || b.time || '').getTime();
+      return bTime - aTime;
+    });
+    return entries;
+  }, [ownerHistory]);
+
+  useEffect(() => {
+    setShowFullTimeline(false);
+  }, [medicine?.batchID]);
+
   if (!medicine) return null;
 
-  const handlePrint = () => {
-    toast.success(`Printing label for ${medicine.batchID}...`);
+  const TIMELINE_PREVIEW_LIMIT = 8;
+  const visibleTimeline = showFullTimeline
+    ? timelineEntries
+    : timelineEntries.slice(0, TIMELINE_PREVIEW_LIMIT);
+  const hasMoreTimeline = timelineEntries.length > TIMELINE_PREVIEW_LIMIT;
+
+  const handlePrint = async () => {
+    setIsPrintingLabel(true);
+    try {
+      await printMedicineLabel(medicine);
+      toast.success(`Opened printable label for ${medicine.batchID}`);
+    } catch {
+      toast.error('Unable to open print window. Please allow pop-ups and try again.');
+    } finally {
+      setIsPrintingLabel(false);
+    }
   };
 
-  const handleDownloadReport = () => {
-    toast.success(`Downloading report for ${medicine.name}...`);
+  const handleDownloadReport = async () => {
+    setIsDownloadingReport(true);
+    try {
+      const excelModule = await import('exceljs');
+      const WorkbookCtor = excelModule.Workbook || excelModule.default?.Workbook;
+      if (!WorkbookCtor) throw new Error('Excel workbook unavailable');
+
+      const workbook = new WorkbookCtor();
+      const worksheet = workbook.addWorksheet('Medicine Report');
+      const generatedAt = new Date().toLocaleString('en-IN');
+
+      worksheet.columns = [
+        { width: 24 },
+        { width: 54 },
+        { width: 18 },
+        { width: 18 },
+        { width: 18 },
+        { width: 16 },
+      ];
+
+      worksheet.mergeCells('A1:F1');
+      const titleCell = worksheet.getCell('A1');
+      titleCell.value = `MediScan Medicine Report - ${medicine.batchID}`;
+      titleCell.font = { bold: true, size: 15, color: { argb: 'FFFFFFFF' } };
+      titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF047857' } };
+      titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+      worksheet.getRow(1).height = 24;
+
+      worksheet.mergeCells('A2:F2');
+      const metaCell = worksheet.getCell('A2');
+      metaCell.value = `Generated: ${generatedAt}`;
+      metaCell.font = { italic: true, color: { argb: 'FF475569' } };
+
+      const summaryRows: Array<[string, string]> = [
+        ['Batch ID', medicine.batchID],
+        ['Medicine Name', medicine.name],
+        ['Manufacturer', medicine.manufacturer],
+        ['Category', medicine.category || 'Medicine'],
+        ['Status', (medicine.status || 'UNKNOWN').replace('_', ' ')],
+        ['Verified', medicine.verified ? 'Yes' : 'No'],
+        ['MFG Date', medicine.mfgDate],
+        ['EXP Date', medicine.expDate],
+        ['Price Per Unit (INR)', (medicine.price ?? 0).toFixed(2)],
+        ['Total Units', String(medicine.totalUnits ?? 0)],
+        ['Remaining Units', String(medicine.remainingUnits ?? medicine.totalUnits ?? 0)],
+        ['Location', medicine.location || 'Unknown'],
+      ];
+
+      let rowIndex = 4;
+      for (const [field, value] of summaryRows) {
+        const row = worksheet.getRow(rowIndex);
+        row.getCell(1).value = field;
+        row.getCell(2).value = value;
+
+        row.getCell(1).font = { bold: true, color: { argb: 'FF0F172A' } };
+        row.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+        row.getCell(2).alignment = { wrapText: true };
+
+        row.getCell(1).border = {
+          top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        };
+        row.getCell(2).border = {
+          top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        };
+        rowIndex += 1;
+      }
+
+      rowIndex += 1;
+      worksheet.mergeCells(`A${rowIndex}:F${rowIndex}`);
+      const timelineTitleCell = worksheet.getCell(`A${rowIndex}`);
+      timelineTitleCell.value = 'Timeline Events';
+      timelineTitleCell.font = { bold: true, size: 12, color: { argb: 'FFFFFFFF' } };
+      timelineTitleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F766E' } };
+      timelineTitleCell.alignment = { horizontal: 'left', vertical: 'middle' };
+      worksheet.getRow(rowIndex).height = 20;
+
+      rowIndex += 1;
+      const tableHeaderRow = worksheet.getRow(rowIndex);
+      const tableHeaders = ['#', 'Action', 'Owner', 'Date/Time', 'Location', 'Units'];
+      tableHeaders.forEach((header, idx) => {
+        const cell = tableHeaderRow.getCell(idx + 1);
+        cell.value = header;
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0891B2' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+          left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+          bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+          right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+        };
+      });
+      tableHeaderRow.height = 19;
+
+      const timelineSource = timelineEntries.length > 0
+        ? timelineEntries
+        : [{ action: 'NO_TIMELINE', owner: '', date: '', time: '', ownerLocation: '', fromLocation: '', unitsPurchased: undefined }];
+
+      timelineSource.forEach((event, index) => {
+        const lineIndex = rowIndex + index + 1;
+        const row = worksheet.getRow(lineIndex);
+
+        const location = event.action === 'TRANSFERRED'
+          ? `${event.fromLocation || 'Unknown'} -> ${event.ownerLocation || 'Unknown'}`
+          : (event.ownerLocation || event.fromLocation || 'N/A');
+
+        const values = [
+          timelineEntries.length > 0 ? String(index + 1) : '',
+          event.action || 'UPDATED',
+          event.owner || 'Unknown owner',
+          formatEventTime(event.date || event.time),
+          location,
+          event.unitsPurchased ? String(event.unitsPurchased) : '',
+        ];
+
+        values.forEach((value, idx) => {
+          const cell = row.getCell(idx + 1);
+          cell.value = value;
+          cell.alignment = { vertical: 'top', wrapText: true, horizontal: idx === 0 || idx === 5 ? 'center' : 'left' };
+          cell.border = {
+            top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+            left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+            bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+            right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          };
+          if (index % 2 === 0) {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+          }
+        });
+      });
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `medicine-report-${medicine.batchID}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      toast.success(`Downloaded Excel report for ${medicine.name}`);
+    } catch {
+      toast.error('Failed to generate Excel report. Please try again.');
+    } finally {
+      setIsDownloadingReport(false);
+    }
   };
 
   return (
@@ -158,42 +355,65 @@ export function MedicineDetailsModal({ medicine, onClose }: MedicineDetailsModal
                   <h4 className="font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
                     <Clock className="w-4 h-4 text-gray-500" />
                     Timeline
+                    <span className="ml-auto text-xs font-medium text-gray-400">{timelineEntries.length} events</span>
                   </h4>
-                  <div className="relative pl-4 border-l-2 border-gray-200 dark:border-gray-700 space-y-6">
-                    {medicine.ownerHistory.map((h, i) => (
-                      <div key={i} className="relative">
-                        <div className="absolute -left-[21px] top-1 w-3 h-3 rounded-full bg-emerald-500 border-2 border-white dark:border-gray-800 ring-1 ring-gray-100 dark:ring-gray-700" />
-                        <p className="text-xs font-bold text-gray-900 dark:text-gray-100 uppercase">{h.action}</p>
-                        <p className="text-xs text-gray-500">{h.date || h.time}</p>
-                        <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5 truncate w-full" title={h.owner}>
-                          {h.owner}
-                        </p>
-                        {(h.ownerLocation || h.fromLocation) && (
-                          <p className="text-xs text-gray-500 dark:text-gray-500 mt-0.5 truncate w-full" title={h.action === 'TRANSFERRED' ? `${h.fromLocation || 'Unknown'} -> ${h.ownerLocation || 'Unknown'}` : (h.ownerLocation || h.fromLocation)}>
-                            {h.action === 'TRANSFERRED'
-                              ? `${h.fromLocation || 'Unknown'} -> ${h.ownerLocation || 'Unknown'}`
-                              : (h.ownerLocation || h.fromLocation)}
-                          </p>
-                        )}
-                      </div>
-                    ))}
+                  <div className="max-h-[22rem] sm:max-h-96 overflow-y-auto pr-2">
+                    <div className="relative pl-4 border-l-2 border-gray-200 dark:border-gray-700 space-y-6">
+                      {visibleTimeline.map((h, i) => {
+                        const isLatest = i === 0;
+                        return (
+                          <div key={i} className="relative min-w-0">
+                            <div className={`absolute -left-[20px] top-1.5 w-2.5 h-2.5 rounded-full border border-white dark:border-gray-800 ${
+                              isLatest
+                                ? 'bg-emerald-500 ring-2 ring-emerald-100 dark:ring-emerald-900/40'
+                                : 'bg-slate-300 dark:bg-slate-500'
+                            }`} />
+                            <p className="text-xs font-bold text-gray-900 dark:text-gray-100 uppercase">{h.action || 'UPDATED'}</p>
+                            <p className="text-xs text-gray-500">{h.date || h.time || 'Unknown time'}</p>
+                            <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5 break-words" title={h.owner || ''}>
+                              {h.owner || 'Unknown owner'}
+                            </p>
+                            {(h.ownerLocation || h.fromLocation) && (
+                              <p className="text-xs text-gray-500 dark:text-gray-500 mt-0.5 break-words" title={h.action === 'TRANSFERRED' ? `${h.fromLocation || 'Unknown'} -> ${h.ownerLocation || 'Unknown'}` : (h.ownerLocation || h.fromLocation || '')}>
+                                {h.action === 'TRANSFERRED'
+                                  ? `${h.fromLocation || 'Unknown'} -> ${h.ownerLocation || 'Unknown'}`
+                                  : (h.ownerLocation || h.fromLocation)}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
+                  {hasMoreTimeline && (
+                    <button
+                      type="button"
+                      onClick={() => setShowFullTimeline(prev => !prev)}
+                      className="mt-4 w-full text-xs font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-900/40 rounded-lg px-3 py-2 hover:bg-emerald-100 dark:hover:bg-emerald-900/30 transition-colors"
+                    >
+                      {showFullTimeline
+                        ? `Show latest ${TIMELINE_PREVIEW_LIMIT} events`
+                        : `Show all ${timelineEntries.length} events`}
+                    </button>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     onClick={handlePrint}
+                    disabled={isPrintingLabel}
                     className="flex flex-col items-center justify-center p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm font-medium text-gray-700 dark:text-gray-300"
                   >
                     <Printer className="w-5 h-5 mb-1 text-gray-400" />
-                    Print Label
+                    {isPrintingLabel ? 'Preparing...' : 'Print Label'}
                   </button>
                   <button
                     onClick={handleDownloadReport}
+                    disabled={isDownloadingReport}
                     className="flex flex-col items-center justify-center p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm font-medium text-gray-700 dark:text-gray-300"
                   >
                     <Download className="w-5 h-5 mb-1 text-gray-400" />
-                    Report
+                    {isDownloadingReport ? 'Exporting...' : 'Report'}
                   </button>
                 </div>
               </div>

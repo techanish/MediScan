@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { QrCode, Printer, Copy } from 'lucide-react';
 import QRCode from 'react-qr-code';
 import type { Medicine } from '../App';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
+import { buildMedicineQrPayload, getMedicineRegisteredHash } from '../utils/medicineQr';
+import { printMedicineLabel } from '../utils/printLabel';
 import {
   Select,
   SelectContent,
@@ -18,21 +20,39 @@ interface QrCodeGeneratorProps {
 
 export function QrCodeGenerator({ medicines }: QrCodeGeneratorProps) {
   const [selectedBatch, setSelectedBatch] = useState('');
+  const [isPrintingLabel, setIsPrintingLabel] = useState(false);
 
   // Consistent dropdown styling from Tickets page
   const selectTriggerClass = 'w-full border-gray-200/80 dark:border-gray-600/80 bg-gradient-to-b from-white to-gray-50 dark:from-gray-700 dark:to-gray-800 text-gray-800 dark:text-gray-100 shadow-sm';
 
   const selectedMedicine = medicines.find(m => m.batchID === selectedBatch);
-  const qrData = selectedMedicine ? JSON.stringify({
-    id: selectedMedicine.batchID,
-    name: selectedMedicine.name,
-    mfg: selectedMedicine.manufacturer
-  }) : '';
+  const qrData = useMemo(() => {
+    if (!selectedMedicine) return '';
+    return buildMedicineQrPayload(selectedMedicine);
+  }, [selectedMedicine]);
+
+  const registeredHash = useMemo(() => {
+    if (!selectedMedicine) return '';
+    return getMedicineRegisteredHash(selectedMedicine);
+  }, [selectedMedicine]);
 
   const handleCopy = () => {
     if (!qrData) return;
     navigator.clipboard.writeText(qrData);
     toast.success('QR Data copied to clipboard');
+  };
+
+  const handlePrintLabel = async () => {
+    if (!selectedMedicine) return;
+    setIsPrintingLabel(true);
+    try {
+      await printMedicineLabel(selectedMedicine, { qrPayload: qrData });
+      toast.success(`Opened printable label for ${selectedMedicine.batchID}`);
+    } catch {
+      toast.error('Unable to open print window. Please allow pop-ups and try again.');
+    } finally {
+      setIsPrintingLabel(false);
+    }
   };
 
   return (
@@ -80,6 +100,10 @@ export function QrCodeGenerator({ medicines }: QrCodeGeneratorProps) {
                   <span className="text-gray-500 dark:text-gray-400">Expiry</span>
                   <span className="text-gray-900 dark:text-gray-100">{selectedMedicine.expDate}</span>
                 </div>
+                <div className="flex justify-between py-2 border-b border-gray-50 dark:border-gray-700 gap-3">
+                  <span className="text-gray-500 dark:text-gray-400">Registered Hash</span>
+                  <span className="text-gray-900 dark:text-gray-100 font-mono text-xs text-right break-all">{registeredHash || 'Not available'}</span>
+                </div>
               </div>
             </div>
           )}
@@ -114,10 +138,11 @@ export function QrCodeGenerator({ medicines }: QrCodeGeneratorProps) {
                     <Copy className="w-4 h-4" /> Copy Data
                   </button>
                   <button
-                    onClick={() => toast.success('Sent to printer')}
+                    onClick={handlePrintLabel}
+                    disabled={isPrintingLabel}
                     className="flex-1 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-2"
                   >
-                    <Printer className="w-4 h-4" /> Print Label
+                    <Printer className="w-4 h-4" /> {isPrintingLabel ? 'Preparing...' : 'Print Label'}
                   </button>
                 </div>
               </motion.div>

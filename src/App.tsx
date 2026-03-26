@@ -54,6 +54,15 @@ export interface Medicine {
     from?: string;
     fromLocation?: string;
     notes?: string;
+    transferId?: string;
+    transferNonce?: string;
+    transferPayloadHash?: string;
+    transferSignature?: string;
+    blockchainStatus?: string;
+    blockchainIndex?: number;
+    blockchainHash?: string;
+    blockchainPreviousHash?: string;
+    blockchainTimestamp?: string;
   }[];
   verified?: boolean;
   status?: string;
@@ -115,7 +124,7 @@ function formatRelativeTime(dateString: string): string {
   return date.toLocaleDateString();
 }
 
-function parseVerificationInput(rawInput: string): { batchID?: string; txId?: string } {
+function parseVerificationInput(rawInput: string): { batchID?: string; txId?: string; blockHash?: string } {
   const trimmed = String(rawInput || '').trim();
   if (!trimmed) return {};
 
@@ -123,10 +132,18 @@ function parseVerificationInput(rawInput: string): { batchID?: string; txId?: st
     try {
       const parsed = JSON.parse(trimmed);
       const batchFromJson = String(parsed.batchID || parsed.batchId || parsed.id || '').trim();
-      if (batchFromJson) return { batchID: batchFromJson };
-
       const txFromJson = String(parsed.transactionId || parsed.tx || '').trim();
-      if (txFromJson) return { txId: txFromJson };
+      const hashFromJson = String(
+        parsed.registeredHash || parsed.registrationHash || parsed.blockHash || parsed.hash || parsed.registeredPayloadHash || ''
+      ).trim();
+
+      if (batchFromJson || txFromJson || hashFromJson) {
+        return {
+          batchID: batchFromJson || undefined,
+          txId: txFromJson || undefined,
+          blockHash: hashFromJson || undefined,
+        };
+      }
     } catch {
       // Ignore JSON parse errors and continue with URL/raw parsing.
     }
@@ -139,7 +156,17 @@ function parseVerificationInput(rawInput: string): { batchID?: string; txId?: st
     if (batchFromQuery) return { batchID: batchFromQuery };
 
     const txFromQuery = String(url.searchParams.get('tx') || url.searchParams.get('transactionId') || '').trim();
-    if (txFromQuery) return { txId: txFromQuery };
+    const hashFromQuery = String(
+      url.searchParams.get('hash') || url.searchParams.get('blockHash') || url.searchParams.get('registeredHash') || ''
+    ).trim();
+
+    if (batchFromQuery || txFromQuery || hashFromQuery) {
+      return {
+        batchID: batchFromQuery || undefined,
+        txId: txFromQuery || undefined,
+        blockHash: hashFromQuery || undefined,
+      };
+    }
 
     const verifyPathMatch = url.pathname.match(/\/medicine\/verify\/([^/?#]+)/i);
     if (verifyPathMatch?.[1]) {
@@ -152,6 +179,11 @@ function parseVerificationInput(rawInput: string): { batchID?: string; txId?: st
   const txMatch = trimmed.match(/\bTXN-[A-Z0-9-]+\b/i);
   if (txMatch?.[0]) {
     return { txId: txMatch[0].trim() };
+  }
+
+  const hashMatch = trimmed.match(/\b([A-Fa-f0-9]{64})\b/);
+  if (hashMatch?.[1]) {
+    return { blockHash: hashMatch[1] };
   }
 
   return { batchID: trimmed };
@@ -548,14 +580,30 @@ function MediScanApp() {
       const parsed = parseVerificationInput(input);
       let resolvedBatchId = parsed.batchID;
 
-      if (!resolvedBatchId && parsed.txId) {
-        const txId = parsed.txId.toUpperCase();
+      if (!resolvedBatchId && (parsed.txId || parsed.blockHash)) {
+        const txId = parsed.txId?.toUpperCase();
+        const hash = parsed.blockHash?.toLowerCase();
         const chainResponse = await blockchainAPI.getChain(token);
         const chain = Array.isArray(chainResponse?.chain) ? chainResponse.chain : [];
 
-        const targetBlock = chain.find((block: any) => String(block?.data?.transactionId || '').trim().toUpperCase() === txId);
+        let targetBlock = null as any;
+
+        if (txId) {
+          targetBlock = chain.find((block: any) => String(block?.data?.transactionId || '').trim().toUpperCase() === txId);
+        }
+
+        if (!targetBlock && hash) {
+          targetBlock = chain.find((block: any) => {
+            const blockHash = String(block?.hash || '').trim().toLowerCase();
+            const payloadHash = String(block?.data?.transferPayloadHash || '').trim().toLowerCase();
+            return blockHash === hash || payloadHash === hash;
+          });
+        }
 
         if (!targetBlock) {
+          if (parsed.blockHash) {
+            return { verified: false, error: `Hash ${parsed.blockHash} was not found on blockchain.` };
+          }
           return { verified: false, error: `Transaction ${parsed.txId} was not found on blockchain.` };
         }
 

@@ -240,7 +240,7 @@ function MedicineTracker({ chain, medicines, initialBatchID, companyByEmail }: {
                           const actionColors: Record<string, string> = {
                             REGISTERED: 'bg-blue-500', TRANSFERRED: 'bg-purple-500', SOLD: 'bg-emerald-500', PURCHASED: 'bg-emerald-500'
                           };
-                          const dotColor = actionColors[h.action || ''] ?? (isLast ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600');
+                          const dotColor = actionColors[h.action || ''] ?? (isLast ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-500');
                           return (
                             <div key={idx} className="flex gap-5 items-start">
                               <div className={`relative z-10 w-10 h-10 rounded-full ${dotColor} flex items-center justify-center flex-shrink-0 shadow-md ring-4 ring-white dark:ring-gray-800`}>
