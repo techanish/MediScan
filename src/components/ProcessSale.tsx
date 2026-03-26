@@ -14,7 +14,7 @@ import {
 interface ProcessSaleProps {
   medicines: Medicine[];
   user: User;
-  onSale: (batchID: string, quantity: number, customerEmail: string) => Promise<{ success: boolean; error?: string }>;
+  onSale: (batchID: string, quantity: number, customerEmail: string, transactionId?: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 interface SaleInventoryItem {
@@ -134,6 +134,10 @@ export function ProcessSale({ medicines, user, onSale }: ProcessSaleProps) {
     setIsDownloadingInvoice(true);
     setApiError('');
     try {
+      const explorerUrl = new URL(window.location.href);
+      explorerUrl.searchParams.set('tab', 'blockchain');
+      explorerUrl.searchParams.set('tx', completedSale.transactionId);
+
       await downloadInvoicePdf({
         transactionId: completedSale.transactionId,
         items: completedSale.items,
@@ -141,6 +145,7 @@ export function ProcessSale({ medicines, user, onSale }: ProcessSaleProps) {
         totalPrice: completedSale.totalPrice,
         dateTime: completedSale.dateTime,
         customerEmail,
+        blockchainExplorerUrl: explorerUrl.toString(),
       });
     } catch {
       setApiError('Failed to generate invoice PDF. Please try again.');
@@ -226,8 +231,9 @@ export function ProcessSale({ medicines, user, onSale }: ProcessSaleProps) {
 
     try {
       setIsLoading(true);
+      const transactionId = createTransactionId();
       for (const item of saleItems) {
-        const result = await onSale(item.batchID, item.quantity, email);
+        const result = await onSale(item.batchID, item.quantity, email, transactionId);
         if (!result.success) {
           setApiError(result.error || `Sale failed for ${item.medicineName} (${item.batchID}).`);
           return;
@@ -237,7 +243,6 @@ export function ProcessSale({ medicines, user, onSale }: ProcessSaleProps) {
       {
         const totalPrice = saleItems.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
         const totalUnits = saleItems.reduce((sum, item) => sum + item.quantity, 0);
-        const transactionId = createTransactionId();
         const dateTime = new Date().toLocaleString();
 
         setCompletedSale({

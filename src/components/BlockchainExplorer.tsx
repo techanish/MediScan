@@ -94,6 +94,7 @@ function extractTransferFields(data: any): {
 
 interface BlockchainExplorerProps {
   medicines: Medicine[];
+  initialTransactionId?: string;
 }
 
 /* ─────────────── Chain Stats ─────────────── */
@@ -471,7 +472,7 @@ function BlockDetailModal({ block, chain, companyByEmail, onClose, onSelectBlock
 }
 
 /* ─────────────── Main Explorer ─────────────── */
-export function BlockchainExplorer({ medicines }: BlockchainExplorerProps) {
+export function BlockchainExplorer({ medicines, initialTransactionId }: BlockchainExplorerProps) {
   const { getToken } = useAuth();
   const [chain, setChain] = useState<Block[]>([]);
   const [companyByEmail, setCompanyByEmail] = useState<Record<string, string>>({});
@@ -485,6 +486,7 @@ export function BlockchainExplorer({ medicines }: BlockchainExplorerProps) {
   const [liveBlocks, setLiveBlocks] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const hasAppliedInitialTxRef = useRef(false);
 
   const loadChain = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -536,6 +538,26 @@ export function BlockchainExplorer({ medicines }: BlockchainExplorerProps) {
     }
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [liveBlocks, loadChain]);
+
+  useEffect(() => {
+    if (!initialTransactionId || !chain.length || hasAppliedInitialTxRef.current) return;
+
+    const tx = initialTransactionId.trim();
+    if (!tx) return;
+
+    const targetBlock = chain.find((block) => String(block.data?.transactionId || '').trim() === tx);
+    if (targetBlock) {
+      setActiveTab('blocks');
+      setSelectedBlock(targetBlock);
+      setSearch(String(targetBlock.index));
+      const batchId = getBatchIdFromBlock(targetBlock);
+      if (batchId) {
+        setTrackerBatchID(batchId);
+      }
+    }
+
+    hasAppliedInitialTxRef.current = true;
+  }, [initialTransactionId, chain]);
 
   const filteredChain = chain.filter(b => {
     const matchSearch = !search || 

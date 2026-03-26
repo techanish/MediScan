@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useUser, useAuth, SignIn, SignedIn, SignedOut } from '@clerk/clerk-react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Toaster, toast } from 'sonner';
+import { Toaster } from 'sonner';
 import { ThemeProvider } from './components/ThemeProvider';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
@@ -122,11 +122,29 @@ function MediScanApp() {
   const [medicines, setMedicines] = useState<Medicine[]>([]);
   const [isLoadingMedicines, setIsLoadingMedicines] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [initialBlockchainTxId, setInitialBlockchainTxId] = useState('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [headerSearch, setHeaderSearch] = useState('');
   const [showBannedModal, setShowBannedModal] = useState(false);
   const [banMessage, setBanMessage] = useState<string>('');
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get('tab');
+    const tx = params.get('tx');
+
+    if (tab) {
+      setActiveTab(tab);
+    }
+    if (tx) {
+      setInitialBlockchainTxId(tx);
+      if (!tab) {
+        setActiveTab('blockchain');
+      }
+    }
+  }, []);
 
   useEffect(() => {
     if (isLoaded && clerkUser) {
@@ -416,7 +434,7 @@ function MediScanApp() {
     }
   };
 
-  const handlePurchase = async (batchID: string, unitsPurchased: number, customerEmail: string) => {
+  const handlePurchase = async (batchID: string, unitsPurchased: number, customerEmail: string, transactionId?: string) => {
     if (!user) return { success: false, error: 'Not authenticated' };
     try {
       const token = await getToken();
@@ -426,6 +444,7 @@ function MediScanApp() {
         blockchainAPI.addBlock(token, {
           action: 'PURCHASE', batchID, soldBy: user.email, soldTo: customerEmail,
           unitsSold: unitsPurchased, timestamp: new Date().toISOString(),
+          transactionId: transactionId || '',
         }).catch(() => {});
         const filters = user.role !== 'CUSTOMER' ? { owner: user.email } : {};
         const listResponse = await medicineAPI.list(token, filters);
@@ -531,7 +550,7 @@ function MediScanApp() {
       case 'notifications':
         return <Notifications notifications={notifications} onMarkAllRead={handleMarkAllRead} onRead={handleReadNotification} />;
       case 'blockchain':
-        return <BlockchainExplorer medicines={medicines} />;
+        return <BlockchainExplorer medicines={medicines} initialTransactionId={initialBlockchainTxId} />;
       case 'analytics':
         return <Analytics user={user} medicines={medicines} />;
       case 'tickets':
