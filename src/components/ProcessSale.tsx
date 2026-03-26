@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, IndianRupee, Mail, Package2, Receipt, Search, ShoppingCart } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Download, IndianRupee, Mail, Package2, Plus, Receipt, Search, ShoppingCart, Trash2 } from 'lucide-react';
 import type { Medicine, User } from '../App';
+import { downloadInvoicePdf } from './Invoice';
 import { toast } from 'sonner';
 import {
   Select,
@@ -19,6 +20,21 @@ interface ProcessSaleProps {
 interface SaleInventoryItem {
   medicine: Medicine;
   availableUnits: number;
+}
+
+interface SaleLineItem {
+  batchID: string;
+  medicineName: string;
+  quantity: number;
+  unitPrice: number;
+}
+
+interface CompletedSale {
+  transactionId: string;
+  items: SaleLineItem[];
+  totalUnits: number;
+  totalPrice: number;
+  dateTime: string;
 }
 
 const getAvailableUnits = (medicine: Medicine, userEmail: string): number => {
@@ -52,6 +68,14 @@ export function ProcessSale({ medicines, user, onSale }: ProcessSaleProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [isSelectOpen, setIsSelectOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [selectionError, setSelectionError] = useState('');
+  const [quantityError, setQuantityError] = useState('');
+  const [emailError, setEmailError] = useState('');
+  const [apiError, setApiError] = useState('');
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [completedSale, setCompletedSale] = useState<CompletedSale | null>(null);
+  const [isDownloadingInvoice, setIsDownloadingInvoice] = useState(false);
+  const [saleItems, setSaleItems] = useState<SaleLineItem[]>([]);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const saleInventory = useMemo<SaleInventoryItem[]>(() => {
@@ -78,11 +102,15 @@ export function ProcessSale({ medicines, user, onSale }: ProcessSaleProps) {
   const selectedInventoryItem = saleInventory.find((item) => item.medicine.batchID === selectedBatch);
   const selectedMedicine = selectedInventoryItem?.medicine;
   const availableUnits = selectedInventoryItem?.availableUnits ?? 0;
+  const quantityAlreadyAdded = saleItems.find((item) => item.batchID === selectedBatch)?.quantity ?? 0;
+  const remainingUnits = Math.max(0, availableUnits - quantityAlreadyAdded);
   const quantityNumber = Number.parseInt(quantity, 10);
-  const isQuantityValid = Number.isInteger(quantityNumber) && quantityNumber > 0 && quantityNumber <= availableUnits;
+  const isQuantityValid = Number.isInteger(quantityNumber) && quantityNumber > 0 && quantityNumber <= remainingUnits;
   const lineTotal = selectedMedicine && isQuantityValid
     ? quantityNumber * (selectedMedicine.price || 0)
     : 0;
+  const saleGrandTotal = saleItems.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
+  const totalUnitsInCart = saleItems.reduce((sum, item) => sum + item.quantity, 0);
 
   useEffect(() => {
     if (!isSelectOpen) return;
@@ -95,42 +123,143 @@ export function ProcessSale({ medicines, user, onSale }: ProcessSaleProps) {
     return () => window.clearTimeout(timer);
   }, [isSelectOpen]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const createTransactionId = () => {
+    const rand = Math.random().toString(36).slice(2, 8).toUpperCase();
+    return `TXN-${Date.now()}-${rand}`;
+  };
+
+  const downloadInvoice = async () => {
+    if (!completedSale) return;
+
+    setIsDownloadingInvoice(true);
+    setApiError('');
+    try {
+      await downloadInvoicePdf({
+        transactionId: completedSale.transactionId,
+        items: completedSale.items,
+        totalUnits: completedSale.totalUnits,
+        totalPrice: completedSale.totalPrice,
+        dateTime: completedSale.dateTime,
+        customerEmail,
+      });
+    } catch {
+      setApiError('Failed to generate invoice PDF. Please try again.');
+    } finally {
+      setIsDownloadingInvoice(false);
+    }
+  };
+
+  const handleAddMedicine = () => {
+    setSelectionError('');
+    setQuantityError('');
+    setApiError('');
+
     if (!selectedMedicine) {
-      toast.error('Please select a medicine from inventory');
+      setSelectionError('Please select a medicine from inventory.');
       return;
     }
 
-    if (!isQuantityValid) {
-      toast.error('Please enter a valid quantity');
+    if (!Number.isInteger(quantityNumber) || quantityNumber <= 0) {
+      setQuantityError('Quantity must be greater than 0.');
+      return;
+    }
+
+    if (quantityNumber > remainingUnits) {
+      setQuantityError(`Out of stock. Only ${remainingUnits} units available for this batch.`);
+      return;
+    }
+
+    setSaleItems((prev) => {
+      const index = prev.findIndex((item) => item.batchID === selectedBatch);
+      if (index === -1) {
+        return [
+          ...prev,
+          {
+            batchID: selectedBatch,
+            medicineName: selectedMedicine.name,
+            quantity: quantityNumber,
+            unitPrice: selectedMedicine.price || 0,
+          },
+        ];
+      }
+
+      const next = [...prev];
+      next[index] = {
+        ...next[index],
+        quantity: next[index].quantity + quantityNumber,
+      };
+      return next;
+    });
+
+    setQuantity('');
+  };
+
+  const handleRemoveMedicine = (batchID: string) => {
+    setSaleItems((prev) => prev.filter((item) => item.batchID !== batchID));
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isLoading) return;
+
+    setSelectionError('');
+    setQuantityError('');
+    setEmailError('');
+    setApiError('');
+
+    if (!saleItems.length) {
+      setApiError('Please add at least one medicine to the sale.');
       return;
     }
 
     const email = customerEmail.trim().toLowerCase();
     if (!email) {
-      toast.error('Customer email is required');
+      setEmailError('Customer email is required.');
       return;
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      toast.error('Please enter a valid customer email');
+      setEmailError('Please enter a valid customer email.');
       return;
     }
 
-    setIsLoading(true);
-    const result = await onSale(selectedBatch, quantityNumber, email);
-    setIsLoading(false);
+    try {
+      setIsLoading(true);
+      for (const item of saleItems) {
+        const result = await onSale(item.batchID, item.quantity, email);
+        if (!result.success) {
+          setApiError(result.error || `Sale failed for ${item.medicineName} (${item.batchID}).`);
+          return;
+        }
+      }
 
-    if (result.success) {
-      toast.success(`Sold ${quantityNumber} units successfully`);
-      setQuantity('');
-      setCustomerEmail('');
-      setSelectedBatch('');
-      setSearchQuery('');
-    } else {
-      toast.error(result.error || 'Sale failed');
+      {
+        const totalPrice = saleItems.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
+        const totalUnits = saleItems.reduce((sum, item) => sum + item.quantity, 0);
+        const transactionId = createTransactionId();
+        const dateTime = new Date().toLocaleString();
+
+        setCompletedSale({
+          transactionId,
+          items: saleItems,
+          totalUnits,
+          totalPrice,
+          dateTime,
+        });
+
+        toast.success('Process sale completed');
+        setShowSuccessModal(true);
+        setSaleItems([]);
+        setQuantity('');
+        setCustomerEmail('');
+        setSelectedBatch('');
+        setSearchQuery('');
+      }
+    } catch {
+      setApiError('API failure while processing the sale. Please retry.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -152,8 +281,8 @@ export function ProcessSale({ medicines, user, onSale }: ProcessSaleProps) {
               <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-white">{saleInventory.length}</p>
             </div>
             <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-900/40 px-4 py-3">
-              <p className="text-xs text-gray-500 dark:text-gray-400">Units in Selection</p>
-              <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-white">{availableUnits}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">Units Remaining</p>
+              <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-white">{remainingUnits}</p>
             </div>
           </div>
         </div>
@@ -174,6 +303,7 @@ export function ProcessSale({ medicines, user, onSale }: ProcessSaleProps) {
                 }}
                 onValueChange={(value) => {
                   setSelectedBatch(value);
+                  setSelectionError('');
                   setSearchQuery('');
                 }}
               >
@@ -228,6 +358,9 @@ export function ProcessSale({ medicines, user, onSale }: ProcessSaleProps) {
                 No saleable inventory is available for your account.
               </div>
             )}
+            {!!selectionError && (
+              <p className="mt-2 text-xs text-rose-600 dark:text-rose-400">{selectionError}</p>
+            )}
             {saleInventory.length > 0 && !selectedBatch && (
               <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">Select one item from the search results to continue.</p>
             )}
@@ -240,16 +373,21 @@ export function ProcessSale({ medicines, user, onSale }: ProcessSaleProps) {
                 id="sale-quantity"
                 type="number"
                 value={quantity}
-                onChange={(e) => setQuantity(e.target.value)}
+                onChange={(e) => {
+                  setQuantity(e.target.value);
+                  setQuantityError('');
+                }}
                 min="1"
                 max={availableUnits || undefined}
                 placeholder="Enter units"
                 className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-200 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 dark:focus:border-emerald-500 dark:focus:ring-emerald-900/40"
-                required
               />
               <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                Max available: <span className="font-semibold text-gray-700 dark:text-gray-200">{availableUnits}</span>
+                Max available now: <span className="font-semibold text-gray-700 dark:text-gray-200">{remainingUnits}</span>
               </p>
+              {!!quantityError && (
+                <p className="mt-2 text-xs text-rose-600 dark:text-rose-400">{quantityError}</p>
+              )}
             </div>
 
             <div>
@@ -259,7 +397,10 @@ export function ProcessSale({ medicines, user, onSale }: ProcessSaleProps) {
                   <button
                     key={preset}
                     type="button"
-                    onClick={() => setQuantity(String(preset))}
+                    onClick={() => {
+                      setQuantity(String(preset));
+                      setQuantityError('');
+                    }}
                     className="rounded-lg border border-gray-200 bg-white px-2 py-2 text-xs font-semibold text-gray-700 transition hover:border-emerald-300 hover:text-emerald-700 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:border-emerald-500 dark:hover:text-emerald-300"
                   >
                     {preset === availableUnits ? 'MAX' : preset}
@@ -269,10 +410,54 @@ export function ProcessSale({ medicines, user, onSale }: ProcessSaleProps) {
             </div>
           </div>
 
-          {selectedMedicine && !isQuantityValid && quantity && (
+          <div className="flex items-center justify-between gap-3 rounded-2xl border border-dashed border-emerald-300 dark:border-emerald-800/60 bg-emerald-50/70 dark:bg-emerald-900/10 p-3">
+            <div>
+              <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-300">Add Selected Medicine</p>
+              <p className="text-xs text-emerald-700/90 dark:text-emerald-400">Build a multi-item sale before processing.</p>
+            </div>
+            <button
+              type="button"
+              onClick={handleAddMedicine}
+              disabled={!selectedBatch || !quantity || !isQuantityValid || isLoading}
+              className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Plus className="h-4 w-4" />
+              Add Medicine
+            </button>
+          </div>
+
+          <div>
+            <h4 className="mb-2 text-sm font-semibold text-gray-700 dark:text-gray-300">Added Medicines</h4>
+            {saleItems.length ? (
+              <div className="space-y-2">
+                {saleItems.map((item) => (
+                  <div key={item.batchID} className="flex items-center justify-between rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/30 px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">{item.medicineName}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Batch {item.batchID} • Qty {item.quantity} • INR {(item.quantity * item.unitPrice).toFixed(2)}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveMedicine(item.batchID)}
+                      className="ml-2 rounded-lg p-1.5 text-rose-600 hover:bg-rose-100 dark:text-rose-400 dark:hover:bg-rose-900/20"
+                      aria-label={`Remove ${item.medicineName}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/30 px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+                No medicines added yet.
+              </p>
+            )}
+          </div>
+
+          {selectedMedicine && !quantityError && !isQuantityValid && quantity && (
             <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-900/20 dark:text-rose-300">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-              Quantity must be between 1 and {availableUnits} for this batch.
+              Quantity must be between 1 and {remainingUnits} for this batch.
             </div>
           )}
 
@@ -283,12 +468,18 @@ export function ProcessSale({ medicines, user, onSale }: ProcessSaleProps) {
               <input
                 type="email"
                 value={customerEmail}
-                onChange={(e) => setCustomerEmail(e.target.value)}
+                onChange={(e) => {
+                  setCustomerEmail(e.target.value);
+                  setEmailError('');
+                }}
                 placeholder="customer@example.com"
                 required
                 className="w-full rounded-xl border border-gray-200 bg-gray-50 py-2.5 pl-9 pr-3 text-sm text-gray-900 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-200 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 dark:focus:border-emerald-500 dark:focus:ring-emerald-900/40"
               />
             </div>
+            {!!emailError && (
+              <p className="mt-2 text-xs text-rose-600 dark:text-rose-400">{emailError}</p>
+            )}
           </div>
         </section>
 
@@ -297,20 +488,16 @@ export function ProcessSale({ medicines, user, onSale }: ProcessSaleProps) {
 
           <div className="space-y-3">
             <div className="flex items-center justify-between rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-700/50">
-              <span className="text-sm text-gray-600 dark:text-gray-300">Batch</span>
-              <span className="font-semibold text-gray-900 dark:text-white">{selectedMedicine?.batchID || '--'}</span>
+              <span className="text-sm text-gray-600 dark:text-gray-300">Added Medicines</span>
+              <span className="font-semibold text-gray-900 dark:text-white">{saleItems.length}</span>
             </div>
             <div className="flex items-center justify-between rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-700/50">
-              <span className="text-sm text-gray-600 dark:text-gray-300">Product</span>
+              <span className="text-sm text-gray-600 dark:text-gray-300">Total Units</span>
+              <span className="font-semibold text-gray-900 dark:text-white">{totalUnitsInCart}</span>
+            </div>
+            <div className="flex items-center justify-between rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-700/50">
+              <span className="text-sm text-gray-600 dark:text-gray-300">Current Selection</span>
               <span className="max-w-40 truncate font-semibold text-gray-900 dark:text-white">{selectedMedicine?.name || '--'}</span>
-            </div>
-            <div className="flex items-center justify-between rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-700/50">
-              <span className="text-sm text-gray-600 dark:text-gray-300">Unit Price</span>
-              <span className="font-semibold text-gray-900 dark:text-white">₹{(selectedMedicine?.price || 0).toFixed(2)}</span>
-            </div>
-            <div className="flex items-center justify-between rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-700/50">
-              <span className="text-sm text-gray-600 dark:text-gray-300">Quantity</span>
-              <span className="font-semibold text-gray-900 dark:text-white">{isQuantityValid ? quantityNumber : 0}</span>
             </div>
           </div>
 
@@ -318,24 +505,33 @@ export function ProcessSale({ medicines, user, onSale }: ProcessSaleProps) {
             <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">Total Amount</p>
             <p className="mt-1 flex items-center gap-1 text-2xl font-bold text-emerald-800 dark:text-emerald-200">
               <IndianRupee className="h-5 w-5" />
-              {lineTotal.toFixed(2)}
+              {(saleItems.length ? saleGrandTotal : lineTotal).toFixed(2)}
             </p>
           </div>
 
           <button
             type="submit"
-            disabled={!selectedBatch || !quantity || !customerEmail || !isQuantityValid || isLoading}
+            disabled={!saleItems.length || !customerEmail || isLoading}
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3.5 font-bold text-white shadow-lg shadow-emerald-200 transition hover:bg-emerald-700 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 dark:shadow-none"
           >
             {isLoading ? (
-              <div className="h-5 w-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+              <>
+                <div className="h-5 w-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                Processing...
+              </>
             ) : (
               <>
                 <Receipt className="h-5 w-5" />
-                Complete Sale
+                Process Sale
               </>
             )}
           </button>
+
+          {!!apiError && (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-900/20 dark:text-rose-300">
+              {apiError}
+            </div>
+          )}
 
           <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
             <Package2 className="h-4 w-4" />
@@ -343,6 +539,81 @@ export function ProcessSale({ medicines, user, onSale }: ProcessSaleProps) {
           </div>
         </aside>
       </form>
+
+      {showSuccessModal && completedSale && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-emerald-200 dark:border-emerald-900/50 bg-white dark:bg-gray-800 p-6 shadow-2xl animate-[fadeScaleIn_0.4s_ease-out]">
+            <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/30">
+              <CheckCircle2 className="h-10 w-10 text-emerald-600 dark:text-emerald-400 animate-[popCheck_0.45s_ease-out]" />
+            </div>
+
+            <h3 className="text-center text-xl font-bold text-gray-900 dark:text-white">Process Sale Completed</h3>
+            <p className="mt-1 text-center text-sm text-gray-600 dark:text-gray-300">Transaction ID: {completedSale.transactionId}</p>
+
+            <div className="mt-4 space-y-2 rounded-xl bg-gray-50 dark:bg-gray-700/40 p-3 text-sm">
+              <div className="flex items-center justify-between text-gray-700 dark:text-gray-200">
+                <span>Items</span>
+                <span className="font-semibold">{completedSale.items.length}</span>
+              </div>
+              <div className="flex items-center justify-between text-gray-700 dark:text-gray-200">
+                <span>Total Units</span>
+                <span className="font-semibold">{completedSale.totalUnits}</span>
+              </div>
+              <div className="flex items-center justify-between text-gray-900 dark:text-gray-100">
+                <span>Total</span>
+                <span className="font-bold">INR {completedSale.totalPrice.toFixed(2)}</span>
+              </div>
+            </div>
+
+            <div className="mt-3 max-h-28 space-y-1 overflow-y-auto rounded-xl border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-900/30 p-2 text-xs text-gray-700 dark:text-gray-200">
+              {completedSale.items.map((item) => (
+                <div key={item.batchID} className="flex items-center justify-between">
+                  <span className="truncate pr-2">{item.medicineName} ({item.batchID})</span>
+                  <span className="font-semibold">x{item.quantity}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-5 flex gap-2">
+              <button
+                type="button"
+                onClick={downloadInvoice}
+                disabled={isDownloadingInvoice}
+                className="flex-1 rounded-xl bg-emerald-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isDownloadingInvoice ? (
+                  'Generating PDF...'
+                ) : (
+                  <span className="inline-flex items-center gap-2">
+                    <Download className="h-4 w-4" />
+                    Download Invoice (PDF)
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowSuccessModal(false)}
+                className="rounded-xl border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        @keyframes fadeScaleIn {
+          0% { opacity: 0; transform: scale(0.92); }
+          100% { opacity: 1; transform: scale(1); }
+        }
+
+        @keyframes popCheck {
+          0% { opacity: 0; transform: scale(0.5); }
+          70% { opacity: 1; transform: scale(1.12); }
+          100% { transform: scale(1); }
+        }
+      `}</style>
     </div>
   );
 }
