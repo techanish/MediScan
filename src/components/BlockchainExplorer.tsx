@@ -5,9 +5,10 @@ import {
   Search, Hash, Database, RefreshCw, ShieldCheck,
   Truck, Package, Activity, ChevronRight,
   Users, ArrowRight, ExternalLink, CheckCircle2, XCircle,
-  AlertOctagon, Cpu, Layers, Zap, Eye
+  AlertOctagon, Cpu, Layers, Zap, Eye, FileText, Boxes
 } from 'lucide-react';
 import { blockchainAPI, companiesAPI } from '../utils/api';
+import { downloadInvoicePdf } from './Invoice';
 import type { Medicine } from '../App';
 
 function normalizeIdentity(value: string): string {
@@ -44,6 +45,7 @@ function getActionBadge(action: string) {
     TRANSFER: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300',
     PURCHASE: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300',
     SALE: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300',
+    INVOICE_ISSUED: 'bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300',
   };
   return map[action?.toUpperCase()] ?? 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300';
 }
@@ -77,8 +79,25 @@ function extractTransferFields(data: any): {
   payloadHash: string;
   signature: string;
 } {
+  const action = getActionLabel(data);
+  const invoice = data?.invoice;
+
+  if (action === 'INVOICE_ISSUED') {
+    return {
+      action,
+      from: String(data?.soldBy || '').trim(),
+      to: String(invoice?.customerEmail || data?.soldTo || '').trim(),
+      units: Number.isFinite(Number(invoice?.totalUnits)) ? Number(invoice.totalUnits) : null,
+      fromLocation: '',
+      toLocation: '',
+      transferId: String(invoice?.transactionId || data?.transactionId || '').trim(),
+      payloadHash: String(invoice?.blockchainExplorerUrl || '').trim(),
+      signature: 'N/A',
+    };
+  }
+
   return {
-    action: getActionLabel(data),
+    action,
     from: String(data?.from || data?.fromOwner || data?.soldBy || data?.registeredBy || data?.manufacturer || '').trim(),
     to: String(data?.to || data?.toOwner || data?.soldTo || '').trim(),
     units: Number.isFinite(Number(data?.unitsTransferred ?? data?.unitsSold ?? data?.units))
@@ -361,23 +380,60 @@ function BlockDetail({ block, chain, companyByEmail, onClose, onSelectBlock }: {
   const status = statusIndicator(block.data);
   const batchId = getBatchIdFromBlock(block);
   const tx = extractTransferFields(block.data);
+  const [isDownloadingInvoice, setIsDownloadingInvoice] = useState(false);
+  const invoicePayload = block.data?.invoice;
+  const isInvoiceBlock = tx.action === 'INVOICE_ISSUED' && invoicePayload;
   const relatedChain = batchId
     ? chain
         .filter((b) => getBatchIdFromBlock(b).toLowerCase() === batchId.toLowerCase())
         .sort((a, b) => a.index - b.index)
     : [block];
 
-  const details = [
-    { label: 'Action', val: tx.action || 'DATA', mono: false },
-    { label: 'Batch ID', val: batchId || 'N/A', mono: true },
-    { label: 'From Company', val: resolveCompanyName(tx.from || 'N/A', companyByEmail), mono: false },
-    { label: 'To Company', val: resolveCompanyName(tx.to || 'N/A', companyByEmail), mono: false },
-    { label: 'Units', val: tx.units !== null ? String(tx.units) : 'N/A', mono: false },
-    { label: 'Route', val: tx.fromLocation || tx.toLocation ? `${tx.fromLocation || 'Unknown'} -> ${tx.toLocation || 'Unknown'}` : 'N/A', mono: false },
-    { label: 'Transfer ID', val: tx.transferId || 'N/A', mono: true },
-    { label: 'Payload Hash', val: tx.payloadHash || block.hash, mono: true },
-    { label: 'Signature', val: tx.signature || 'N/A', mono: true },
-  ];
+  const details = isInvoiceBlock
+    ? [
+        { label: 'Action', val: tx.action || 'INVOICE_ISSUED', mono: false },
+        { label: 'Invoice Transaction', val: String(invoicePayload.transactionId || tx.transferId || 'N/A'), mono: true },
+        { label: 'Seller', val: resolveCompanyName(tx.from || 'N/A', companyByEmail), mono: false },
+        { label: 'Customer', val: String(invoicePayload.customerEmail || tx.to || 'N/A'), mono: false },
+        { label: 'Item Count', val: String(Array.isArray(invoicePayload.items) ? invoicePayload.items.length : 0), mono: false },
+        { label: 'Total Units', val: String(invoicePayload.totalUnits ?? tx.units ?? 'N/A'), mono: false },
+        { label: 'Total Price', val: Number.isFinite(Number(invoicePayload.totalPrice)) ? `INR ${Number(invoicePayload.totalPrice).toFixed(2)}` : 'N/A', mono: false },
+        { label: 'Invoice Date', val: String(invoicePayload.dateTime || 'N/A'), mono: false },
+        { label: 'Explorer Link', val: String(invoicePayload.blockchainExplorerUrl || tx.payloadHash || 'N/A'), mono: true },
+      ]
+    : [
+        { label: 'Action', val: tx.action || 'DATA', mono: false },
+        { label: 'Batch ID', val: batchId || 'N/A', mono: true },
+        { label: 'From Company', val: resolveCompanyName(tx.from || 'N/A', companyByEmail), mono: false },
+        { label: 'To Company', val: resolveCompanyName(tx.to || 'N/A', companyByEmail), mono: false },
+        { label: 'Units', val: tx.units !== null ? String(tx.units) : 'N/A', mono: false },
+        { label: 'Route', val: tx.fromLocation || tx.toLocation ? `${tx.fromLocation || 'Unknown'} -> ${tx.toLocation || 'Unknown'}` : 'N/A', mono: false },
+        { label: 'Transfer ID', val: tx.transferId || 'N/A', mono: true },
+        { label: 'Payload Hash', val: tx.payloadHash || block.hash, mono: true },
+        { label: 'Signature', val: tx.signature || 'N/A', mono: true },
+      ];
+
+  const handleDownloadInvoice = async () => {
+    if (!isInvoiceBlock) return;
+
+    const explorerUrl = invoicePayload.blockchainExplorerUrl
+      || `${window.location.origin}${window.location.pathname}?tab=blockchain&tx=${encodeURIComponent(String(invoicePayload.transactionId || block.data?.transactionId || ''))}`;
+
+    setIsDownloadingInvoice(true);
+    try {
+      await downloadInvoicePdf({
+        transactionId: String(invoicePayload.transactionId || block.data?.transactionId || ''),
+        items: Array.isArray(invoicePayload.items) ? invoicePayload.items : [],
+        totalUnits: Number(invoicePayload.totalUnits || 0),
+        totalPrice: Number(invoicePayload.totalPrice || 0),
+        dateTime: String(invoicePayload.dateTime || date.toLocaleString()),
+        customerEmail: String(invoicePayload.customerEmail || block.data?.soldTo || ''),
+        blockchainExplorerUrl: String(explorerUrl),
+      });
+    } finally {
+      setIsDownloadingInvoice(false);
+    }
+  };
 
   return (
     <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}
@@ -386,7 +442,20 @@ function BlockDetail({ block, chain, companyByEmail, onClose, onSelectBlock }: {
         <h3 className="font-bold text-gray-900 dark:text-white flex items-center gap-2">
           <Database className="w-5 h-5 text-blue-500" /> Block #{block.index}
         </h3>
-        <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">✕</button>
+        <div className="flex items-center gap-2">
+          {isInvoiceBlock && (
+            <button
+              type="button"
+              onClick={handleDownloadInvoice}
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+              disabled={isDownloadingInvoice}
+            >
+              <FileText className="h-4 w-4" />
+              {isDownloadingInvoice ? 'Preparing PDF...' : 'Download Invoice PDF'}
+            </button>
+          )}
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">✕</button>
+        </div>
       </div>
       <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-semibold border ${status.color}`}>
         <status.icon className="w-3.5 h-3.5" /> {status.label}
@@ -415,25 +484,52 @@ function BlockDetail({ block, chain, companyByEmail, onClose, onSelectBlock }: {
           </div>
         </div>
 
+        {isInvoiceBlock && Array.isArray(invoicePayload.items) && invoicePayload.items.length > 0 && (
+          <div>
+            <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+              <Boxes className="w-3.5 h-3.5" /> Invoice Line Items
+            </p>
+            <div className="space-y-2 rounded-xl border border-gray-100 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-900/30 p-2.5">
+              {invoicePayload.items.map((item: any, idx: number) => (
+                <div key={`${item.batchID || 'item'}-${idx}`} className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2.5 text-xs text-gray-700 dark:text-gray-300">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-semibold truncate">{item.medicineName || 'Medicine'}</span>
+                    <span className="font-mono rounded bg-emerald-50 dark:bg-emerald-900/20 px-2 py-0.5 text-emerald-700 dark:text-emerald-300">x{item.quantity || 0}</span>
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-gray-500 dark:text-gray-400">
+                    <span>Batch: <span className="font-mono">{item.batchID || 'N/A'}</span></span>
+                    <span>Unit: INR {Number(item.unitPrice || 0).toFixed(2)}</span>
+                    <span className="font-semibold text-gray-700 dark:text-gray-200">Total: INR {(Number(item.quantity || 0) * Number(item.unitPrice || 0)).toFixed(2)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div>
-          <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-2">Transfer Chain</p>
-          <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+          <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-2">{isInvoiceBlock ? 'Related Blocks' : 'Transfer Chain'}</p>
+          <div className="space-y-2 max-h-72 overflow-y-auto pr-1 rounded-xl border border-gray-100 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-900/30 p-2.5">
             {relatedChain.map((b) => {
               const link = extractTransferFields(b.data);
               const isActive = b.index === block.index;
+              const fromLabel = resolveCompanyName(link.from || 'N/A', companyByEmail);
+              const toLabel = resolveCompanyName(link.to || 'N/A', companyByEmail);
+              const showDirection = fromLabel !== toLabel && toLabel !== getBatchIdFromBlock(b);
               return (
                 <button
                   key={b.index}
                   type="button"
                   onClick={() => onSelectBlock?.(b)}
-                  className={`w-full text-left rounded-lg px-3 py-2 border transition-colors ${isActive ? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20' : 'border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
+                  className={`w-full text-left rounded-lg px-3 py-2.5 border transition-colors ${isActive ? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20' : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[11px] font-semibold text-gray-500 dark:text-gray-400">Block #{b.index}</span>
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${getActionBadge(link.action)}`}>{link.action}</span>
                   </div>
-                  <p className="text-xs font-mono text-gray-700 dark:text-gray-300 mt-1 break-all">
-                    {`${resolveCompanyName(link.from || 'N/A', companyByEmail)} => ${resolveCompanyName(link.to || 'N/A', companyByEmail)}`}
+                  <p className="text-xs font-mono text-gray-700 dark:text-gray-300 mt-1 break-all">{b.hash.slice(0, 28)}...</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    {showDirection ? `${fromLabel} => ${toLabel}` : fromLabel}
                   </p>
                 </button>
               );
@@ -649,6 +745,7 @@ export function BlockchainExplorer({ medicines, initialTransactionId }: Blockcha
               <option value="REGISTER">Register</option>
               <option value="TRANSFER">Transfer</option>
               <option value="PURCHASE">Purchase</option>
+              <option value="INVOICE_ISSUED">Invoice Issued</option>
             </select>
           </div>
 

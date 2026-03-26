@@ -15,6 +15,15 @@ interface ProcessSaleProps {
   medicines: Medicine[];
   user: User;
   onSale: (batchID: string, quantity: number, customerEmail: string, transactionId?: string) => Promise<{ success: boolean; error?: string }>;
+  onRecordInvoice: (payload: {
+    transactionId: string;
+    items: SaleLineItem[];
+    totalUnits: number;
+    totalPrice: number;
+    dateTime: string;
+    customerEmail: string;
+    blockchainExplorerUrl: string;
+  }) => Promise<{ success: boolean; error?: string }>;
 }
 
 interface SaleInventoryItem {
@@ -61,7 +70,7 @@ const getAvailableUnits = (medicine: Medicine, userEmail: string): number => {
   return Math.max(0, Number(received) - Number(transferredOut) - Number(sold));
 };
 
-export function ProcessSale({ medicines, user, onSale }: ProcessSaleProps) {
+export function ProcessSale({ medicines, user, onSale, onRecordInvoice }: ProcessSaleProps) {
   const [selectedBatch, setSelectedBatch] = useState('');
   const [quantity, setQuantity] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
@@ -232,6 +241,12 @@ export function ProcessSale({ medicines, user, onSale }: ProcessSaleProps) {
     try {
       setIsLoading(true);
       const transactionId = createTransactionId();
+      const dateTime = new Date().toLocaleString();
+      const explorerUrl = new URL(window.location.href);
+      explorerUrl.searchParams.set('tab', 'blockchain');
+      explorerUrl.searchParams.set('tx', transactionId);
+      const blockchainExplorerUrl = explorerUrl.toString();
+
       for (const item of saleItems) {
         const result = await onSale(item.batchID, item.quantity, email, transactionId);
         if (!result.success) {
@@ -243,7 +258,20 @@ export function ProcessSale({ medicines, user, onSale }: ProcessSaleProps) {
       {
         const totalPrice = saleItems.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
         const totalUnits = saleItems.reduce((sum, item) => sum + item.quantity, 0);
-        const dateTime = new Date().toLocaleString();
+
+        const invoiceRecord = await onRecordInvoice({
+          transactionId,
+          items: saleItems,
+          totalUnits,
+          totalPrice,
+          dateTime,
+          customerEmail: email,
+          blockchainExplorerUrl,
+        });
+
+        if (!invoiceRecord.success) {
+          setApiError(invoiceRecord.error || 'Sale completed but invoice record was not written to blockchain.');
+        }
 
         setCompletedSale({
           transactionId,

@@ -115,6 +115,48 @@ function formatRelativeTime(dateString: string): string {
   return date.toLocaleDateString();
 }
 
+function parseVerificationInput(rawInput: string): { batchID?: string; txId?: string } {
+  const trimmed = String(rawInput || '').trim();
+  if (!trimmed) return {};
+
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      const batchFromJson = String(parsed.batchID || parsed.batchId || parsed.id || '').trim();
+      if (batchFromJson) return { batchID: batchFromJson };
+
+      const txFromJson = String(parsed.transactionId || parsed.tx || '').trim();
+      if (txFromJson) return { txId: txFromJson };
+    } catch {
+      // Ignore JSON parse errors and continue with URL/raw parsing.
+    }
+  }
+
+  try {
+    const url = new URL(trimmed, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+    const batchFromQuery =
+      String(url.searchParams.get('batchID') || url.searchParams.get('batchId') || url.searchParams.get('id') || '').trim();
+    if (batchFromQuery) return { batchID: batchFromQuery };
+
+    const txFromQuery = String(url.searchParams.get('tx') || url.searchParams.get('transactionId') || '').trim();
+    if (txFromQuery) return { txId: txFromQuery };
+
+    const verifyPathMatch = url.pathname.match(/\/medicine\/verify\/([^/?#]+)/i);
+    if (verifyPathMatch?.[1]) {
+      return { batchID: decodeURIComponent(verifyPathMatch[1]).trim() };
+    }
+  } catch {
+    // Non-URL input, handled below.
+  }
+
+  const txMatch = trimmed.match(/\bTXN-[A-Z0-9-]+\b/i);
+  if (txMatch?.[0]) {
+    return { txId: txMatch[0].trim() };
+  }
+
+  return { batchID: trimmed };
+}
+
 function MediScanApp() {
   const { user: clerkUser, isLoaded } = useUser();
   const { getToken, signOut } = useAuth();
@@ -457,11 +499,91 @@ function MediScanApp() {
     }
   };
 
-  const handleVerify = async (batchID: string): Promise<{ verified: boolean; medicine?: Medicine; error?: string }> => {
+  const handleRecordInvoice = async (payload: {
+    transactionId: string;
+    items: Array<{ batchID: string; medicineName: string; quantity: number; unitPrice: number }>;
+    totalUnits: number;
+    totalPrice: number;
+    dateTime: string;
+    customerEmail: string;
+    blockchainExplorerUrl: string;
+  }) => {
+    if (!user) return { success: false, error: 'Not authenticated' };
+    try {
+      const token = await getToken();
+      if (!token) return { success: false, error: 'Failed to get authentication token' };
+
+      const response = await blockchainAPI.addBlock(token, {
+        action: 'INVOICE_ISSUED',
+        transactionId: payload.transactionId,
+        soldBy: user.email,
+        soldTo: payload.customerEmail,
+        timestamp: new Date().toISOString(),
+        invoice: {
+          transactionId: payload.transactionId,
+          items: payload.items,
+          totalUnits: payload.totalUnits,
+          totalPrice: payload.totalPrice,
+          dateTime: payload.dateTime,
+          customerEmail: payload.customerEmail,
+          blockchainExplorerUrl: payload.blockchainExplorerUrl,
+        },
+      });
+
+      if (response?.success) {
+        return { success: true };
+      }
+
+      return { success: false, error: response?.error || 'Failed to write invoice block to blockchain' };
+    } catch (error: any) {
+      return { success: false, error: error.message || 'Failed to write invoice block to blockchain' };
+    }
+  };
+
+  const handleVerify = async (input: string): Promise<{ verified: boolean; medicine?: Medicine; error?: string }> => {
     try {
       const token = await getToken();
       if (!token) return { verified: false, error: 'Authentication required' };
-      const response = await medicineAPI.list(token, { batchID });
+
+      const parsed = parseVerificationInput(input);
+      let resolvedBatchId = parsed.batchID;
+
+      if (!resolvedBatchId && parsed.txId) {
+        const txId = parsed.txId.toUpperCase();
+        const chainResponse = await blockchainAPI.getChain(token);
+        const chain = Array.isArray(chainResponse?.chain) ? chainResponse.chain : [];
+
+        const targetBlock = chain.find((block: any) => String(block?.data?.transactionId || '').trim().toUpperCase() === txId);
+
+        if (!targetBlock) {
+          return { verified: false, error: `Transaction ${parsed.txId} was not found on blockchain.` };
+        }
+
+        const directBatchId = String(targetBlock?.data?.batchID || targetBlock?.data?.batchId || '').trim();
+        if (directBatchId) {
+          resolvedBatchId = directBatchId;
+        } else {
+          const invoiceItems = Array.isArray(targetBlock?.data?.invoice?.items) ? targetBlock.data.invoice.items : [];
+          const invoiceBatchIds = invoiceItems
+            .map((item: any) => String(item?.batchID || item?.batchId || '').trim())
+            .filter(Boolean);
+
+          if (invoiceBatchIds.length === 1) {
+            resolvedBatchId = invoiceBatchIds[0];
+          } else if (invoiceBatchIds.length > 1) {
+            return {
+              verified: false,
+              error: `Invoice has multiple batches: ${invoiceBatchIds.join(', ')}. Please scan product QR or enter a specific Batch ID.`,
+            };
+          }
+        }
+      }
+
+      if (!resolvedBatchId) {
+        return { verified: false, error: 'Could not resolve Batch ID from scanned QR. Please scan product QR or enter Batch ID.' };
+      }
+
+      const response = await medicineAPI.list(token, { batchID: resolvedBatchId });
       if (response.success && response.medicines && response.medicines.length > 0) {
         return { verified: true, medicine: response.medicines[0] };
       }
@@ -540,7 +662,7 @@ function MediScanApp() {
       case 'transfer':
         return <TransferOwnership medicines={medicines} getToken={getToken} onTransfer={handleTransfer} userEmail={user.email} />;
       case 'sales':
-        return <ProcessSale medicines={medicines} user={user} onSale={handlePurchase} />;
+        return <ProcessSale medicines={medicines} user={user} onSale={handlePurchase} onRecordInvoice={handleRecordInvoice} />;
       case 'qrcode':
         return <QrCodeGenerator medicines={medicines} />;
       case 'admin':

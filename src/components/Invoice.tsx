@@ -1,4 +1,5 @@
 import * as QRCode from 'qrcode';
+import stampImage from '../assets/stamp.png';
 
 export interface InvoiceItem {
   batchID: string;
@@ -31,6 +32,18 @@ async function getJsPdfConstructor() {
   });
 
   return (window as Window & { jspdf?: { jsPDF?: any } }).jspdf?.jsPDF;
+}
+
+async function imageUrlToDataUrl(url: string): Promise<string> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error('Failed to load image asset');
+  const blob = await response.blob();
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Failed to parse image asset'));
+    reader.readAsDataURL(blob);
+  });
 }
 
 export async function downloadInvoicePdf(data: InvoiceDocumentData): Promise<void> {
@@ -179,6 +192,38 @@ export async function downloadInvoicePdf(data: InvoiceDocumentData): Promise<voi
     y += rowHeight;
   });
 
+  const qrCardSize = 34;
+  const qrInnerSize = 24;
+  const qrCardX = right - qrCardSize;
+  const qrCardY = pageHeight - 63;
+
+  // Embedded paid stamp image (with vector fallback).
+  const stampW = qrCardSize;
+  const stampH = qrCardSize;
+  const stampX = left + 2;
+  const stampY = pageHeight - 63;
+
+  try {
+    const stampDataUrl = await imageUrlToDataUrl(stampImage);
+    doc.addImage(stampDataUrl, 'PNG', stampX, stampY, stampW, stampH);
+  } catch {
+    const stampCx = stampX + (stampW / 2);
+    const stampCy = stampY + (stampH / 2);
+    const outerRadius = (stampW / 2) - 1.2;
+    const innerRadius = outerRadius - 2;
+    doc.setDrawColor(green700[0], green700[1], green700[2]);
+    doc.setLineWidth(0.9);
+    doc.circle(stampCx, stampCy, outerRadius, 'S');
+    doc.setLineWidth(0.5);
+    doc.circle(stampCx, stampCy, innerRadius, 'S');
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(green700[0], green700[1], green700[2]);
+    doc.setFontSize(8.2);
+    doc.text('PAID', stampCx, stampCy + 0.8, { align: 'center', angle: -15 });
+    doc.setFontSize(5.3);
+    doc.text('MediScan', stampCx, stampCy + 7.2, { align: 'center', angle: -15 });
+  }
+
   const summaryTop = y + 8;
   const summaryWidth = 68;
   const summaryLeft = right - summaryWidth;
@@ -228,11 +273,6 @@ export async function downloadInvoicePdf(data: InvoiceDocumentData): Promise<voi
   doc.setFontSize(8.8);
   doc.text(`Ledger Reference: ${data.transactionId}`, left + 3, certTop + 13);
   doc.text('Issued by MediScan secure invoice engine.', right - 3, certTop + 13, { align: 'right' });
-
-  const qrCardSize = 30;
-  const qrInnerSize = 20;
-  const qrCardX = right - qrCardSize;
-  const qrCardY = pageHeight - 59;
 
   doc.setFillColor(255, 255, 255);
   doc.roundedRect(qrCardX, qrCardY, qrCardSize, qrCardSize, 2, 2, 'F');
