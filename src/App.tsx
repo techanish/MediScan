@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useUser, useAuth, SignIn, SignedIn, SignedOut } from '@clerk/clerk-react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Toaster } from 'sonner';
+import { Toaster, toast } from 'sonner';
 import { ThemeProvider } from './components/ThemeProvider';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
@@ -19,6 +19,9 @@ import type { Notification } from './components/Notifications';
 import { Analytics } from './components/Analytics';
 import { BlockchainExplorer } from './components/BlockchainExplorer';
 import { Tickets } from './components/Tickets';
+import { BannedModal } from './components/BannedModal';
+import { BanAppealForm } from './components/BanAppealForm';
+import { BanGuard } from './components/BanGuard';
 import { medicineAPI, blockchainAPI, authAPI } from './utils/api';
 
 export interface User {
@@ -114,7 +117,7 @@ function formatRelativeTime(dateString: string): string {
 
 function MediScanApp() {
   const { user: clerkUser, isLoaded } = useUser();
-  const { getToken } = useAuth();
+  const { getToken, signOut } = useAuth();
   const [user, setUser] = useState<User | null>(null);
   const [medicines, setMedicines] = useState<Medicine[]>([]);
   const [isLoadingMedicines, setIsLoadingMedicines] = useState(false);
@@ -122,6 +125,8 @@ function MediScanApp() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [headerSearch, setHeaderSearch] = useState('');
+  const [showBannedModal, setShowBannedModal] = useState(false);
+  const [banMessage, setBanMessage] = useState<string>('');
 
   useEffect(() => {
     if (isLoaded && clerkUser) {
@@ -159,14 +164,28 @@ function MediScanApp() {
       if (response.success && response.medicines) {
         setMedicines(response.medicines);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to load medicines:', error);
+      // Check if banned
+      if (error.message?.includes('banned') || error.message?.includes('Account is banned')) {
+        setBanMessage(error.message || 'Your account has been suspended');
+        setShowBannedModal(true);
+        setTimeout(async () => {
+          try {
+            await signOut();
+            setUser(null);
+            setMedicines([]);
+          } catch (err) {
+            console.error('Sign out error:', err);
+          }
+        }, 2000);
+      }
     } finally {
       if (!options?.silent) {
         setIsLoadingMedicines(false);
       }
     }
-  }, [user, getToken]);
+  }, [user, getToken, signOut]);
 
   useEffect(() => {
     loadMedicines();
@@ -185,6 +204,29 @@ function MediScanApp() {
       const response = await fetch(buildApiUrl('/notifications'), {
         headers: { Authorization: `Bearer ${token}` },
       });
+
+      if (!response.ok) {
+        // Check if banned
+        if (response.status === 403) {
+          const data = await response.json();
+          if (data.error?.includes('banned') || data.message?.includes('banned')) {
+            setBanMessage(data.message || data.error || 'Your account has been suspended');
+            setShowBannedModal(true);
+            setTimeout(async () => {
+              try {
+                await signOut();
+                setUser(null);
+                setMedicines([]);
+              } catch (err) {
+                console.error('Sign out error:', err);
+              }
+            }, 2000);
+            return;
+          }
+        }
+        return;
+      }
+
       const data = await response.json();
       if (data.success && data.notifications) {
         setNotifications(
@@ -201,7 +243,7 @@ function MediScanApp() {
     } catch {
       // Notifications are non-critical
     }
-  }, [getToken]);
+  }, [getToken, signOut]);
 
   useEffect(() => {
     if (user) loadNotifications();
@@ -301,7 +343,12 @@ function MediScanApp() {
     };
   }, [user, getToken]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await signOut();
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
     setUser(null);
     setMedicines([]);
   };
@@ -536,6 +583,12 @@ function MediScanApp() {
     <div className="flex h-screen bg-gray-50 dark:bg-gray-900 font-sans text-slate-900 dark:text-gray-100 transition-colors duration-300">
       <Toaster position="top-right" richColors />
 
+      <BannedModal
+        isOpen={showBannedModal}
+        onClose={() => setShowBannedModal(false)}
+        message={banMessage}
+      />
+
       <Sidebar
         user={user}
         activeTab={activeTab}
@@ -577,45 +630,65 @@ function MediScanApp() {
 }
 
 export function App() {
+  const { user: clerkUser } = useUser();
+  const [showAppealForm, setShowAppealForm] = useState(false);
+
   return (
     <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme">
       <SignedOut>
         <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
-          <div className="w-full max-w-md">
-            <div className="text-center mb-8">
-              <h1 className="text-3xl font-bold text-emerald-600 mb-2">MediScan</h1>
-              <p className="text-gray-500 dark:text-gray-400">Medicine Verification System</p>
+          {showAppealForm ? (
+            <BanAppealForm
+              userEmail={clerkUser?.primaryEmailAddress?.emailAddress}
+              onClose={() => setShowAppealForm(false)}
+            />
+          ) : (
+            <div className="w-full max-w-md">
+              <div className="text-center mb-8">
+                <h1 className="text-3xl font-bold text-emerald-600 mb-2">MediScan</h1>
+                <p className="text-gray-500 dark:text-gray-400">Medicine Verification System</p>
+              </div>
+              <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 p-6">
+                <SignIn
+                  appearance={{
+                    elements: {
+                      rootBox: 'w-full',
+                      card: 'shadow-none',
+                      main: 'bg-transparent',
+                    },
+                  }}
+                />
+              </div>
+              <div className="mt-6 p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-900/30 rounded-xl">
+                <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-300 mb-2">Setting Up User Roles</p>
+                <p className="text-xs text-emerald-800 dark:text-emerald-400 mb-2">
+                  After signing up, set your role in Clerk Dashboard:
+                </p>
+                <ol className="text-xs text-emerald-800 dark:text-emerald-400 space-y-1 ml-4 list-decimal">
+                  <li>Go to Clerk Dashboard → Users</li>
+                  <li>Click on your user → Metadata tab</li>
+                  <li>Add to Public Metadata: <code className="bg-emerald-100 dark:bg-emerald-900/50 px-1 rounded">{"{ \"role\": \"MANUFACTURER\" }"}</code></li>
+                </ol>
+                <p className="text-xs text-emerald-700 dark:text-emerald-500 mt-2">
+                  Available roles: MANUFACTURER, DISTRIBUTOR, PHARMACY, CUSTOMER, ADMIN
+                </p>
+              </div>
+              <div className="mt-4 text-center">
+                <button
+                  onClick={() => setShowAppealForm(true)}
+                  className="text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 font-medium underline"
+                >
+                  Account Banned? Submit an Appeal
+                </button>
+              </div>
             </div>
-            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 p-6">
-              <SignIn
-                appearance={{
-                  elements: {
-                    rootBox: 'w-full',
-                    card: 'shadow-none',
-                    main: 'bg-transparent',
-                  },
-                }}
-              />
-            </div>
-            <div className="mt-6 p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-900/30 rounded-xl">
-              <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-300 mb-2">Setting Up User Roles</p>
-              <p className="text-xs text-emerald-800 dark:text-emerald-400 mb-2">
-                After signing up, set your role in Clerk Dashboard:
-              </p>
-              <ol className="text-xs text-emerald-800 dark:text-emerald-400 space-y-1 ml-4 list-decimal">
-                <li>Go to Clerk Dashboard → Users</li>
-                <li>Click on your user → Metadata tab</li>
-                <li>Add to Public Metadata: <code className="bg-emerald-100 dark:bg-emerald-900/50 px-1 rounded">{"{ \"role\": \"MANUFACTURER\" }"}</code></li>
-              </ol>
-              <p className="text-xs text-emerald-700 dark:text-emerald-500 mt-2">
-                Available roles: MANUFACTURER, DISTRIBUTOR, PHARMACY, CUSTOMER, ADMIN
-              </p>
-            </div>
-          </div>
+          )}
         </div>
       </SignedOut>
       <SignedIn>
-        <MediScanApp />
+        <BanGuard>
+          <MediScanApp />
+        </BanGuard>
       </SignedIn>
     </ThemeProvider>
   );

@@ -2,6 +2,13 @@ import React, { useState } from 'react';
 import { PlusCircle, Sparkles } from 'lucide-react';
 import type { Medicine } from '../App';
 import { toast } from 'sonner';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './ui/select';
 
 interface RegisterMedicineProps {
   onRegister: (data: Partial<Medicine>) => Promise<{ success: boolean; error?: string } | void>;
@@ -24,6 +31,9 @@ export function RegisterMedicine({ onRegister }: RegisterMedicineProps) {
   });
   const [isGenerating, setIsGenerating] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Consistent dropdown styling from Tickets page
+  const selectTriggerClass = 'w-full border-gray-200/80 dark:border-gray-600/80 bg-gradient-to-b from-white to-gray-50 dark:from-gray-700 dark:to-gray-800 text-gray-800 dark:text-gray-100 shadow-sm';
 
   const generateAiDescription = () => {
     if (!form.name || !form.category) {
@@ -98,17 +108,20 @@ export function RegisterMedicine({ onRegister }: RegisterMedicineProps) {
 
           <div className="space-y-2">
             <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 ml-1">Category</label>
-            <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} title="Medicine Category"
-              className="w-full px-4 py-3 rounded-xl bg-gray-50 dark:bg-gray-700 border-transparent focus:bg-white dark:focus:bg-gray-600 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 transition-all appearance-none text-gray-900 dark:text-gray-100">
-              <option value="">Select Category</option>
-              <option value="Antibiotic">Antibiotic</option>
-              <option value="Painkiller">Painkiller</option>
-              <option value="Vitamin">Vitamin</option>
-              <option value="Cardiovascular">Cardiovascular</option>
-              <option value="Antidiabetic">Antidiabetic</option>
-              <option value="Antiviral">Antiviral</option>
-              <option value="Other">Other</option>
-            </select>
+            <Select value={form.category} onValueChange={(value) => setForm({ ...form, category: value })}>
+              <SelectTrigger className={selectTriggerClass} aria-label="Medicine Category">
+                <SelectValue placeholder="Select Category" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Antibiotic">Antibiotic</SelectItem>
+                <SelectItem value="Painkiller">Painkiller</SelectItem>
+                <SelectItem value="Vitamin">Vitamin</SelectItem>
+                <SelectItem value="Cardiovascular">Cardiovascular</SelectItem>
+                <SelectItem value="Antidiabetic">Antidiabetic</SelectItem>
+                <SelectItem value="Antiviral">Antiviral</SelectItem>
+                <SelectItem value="Other">Other</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="space-y-2">

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Search, Save, Users, RefreshCw } from 'lucide-react';
+import { Search, Save, Users, RefreshCw, Ban, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { adminAPI, authAPI } from '../utils/api';
 
@@ -16,9 +16,13 @@ interface PlatformUser {
   role: 'MANUFACTURER' | 'DISTRIBUTOR' | 'PHARMACY' | 'CUSTOMER' | 'ADMIN';
   companyName: string;
   createdAt?: number;
+  banned?: boolean;
 }
 
 const ROLE_OPTIONS: PlatformUser['role'][] = ['MANUFACTURER', 'DISTRIBUTOR', 'PHARMACY', 'CUSTOMER', 'ADMIN'];
+
+// Consistent dropdown styling from Tickets page (adapted for native select in table)
+const selectClass = 'w-full px-3 py-2 rounded-lg border-gray-200/80 dark:border-gray-600/80 bg-gradient-to-b from-white to-gray-50 dark:from-gray-700 dark:to-gray-800 text-gray-800 dark:text-gray-100 shadow-sm dark:[color-scheme:dark] focus:outline-none focus:ring-2 focus:ring-emerald-500';
 
 export function AdminPanel({ getToken }: AdminPanelProps) {
   const [users, setUsers] = useState<PlatformUser[]>([]);
@@ -95,6 +99,41 @@ export function AdminPanel({ getToken }: AdminPanelProps) {
     }
   };
 
+  const toggleBanUser = async (user: PlatformUser) => {
+    const action = user.banned ? 'unban' : 'ban';
+    const confirmed = window.confirm(
+      `Are you sure you want to ${action} ${user.email}?\n\n${
+        user.banned
+          ? 'This user will be able to log in and access the system again.'
+          : 'This user will be immediately logged out and unable to access the system.'
+      }`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      const token = await getToken();
+      if (!token) {
+        toast.error('Authentication required');
+        return;
+      }
+
+      const response = await adminAPI.updateUserStatus(token, user.userId, !user.banned);
+
+      if (response?.success) {
+        toast.success(user.banned ? `Unbanned ${user.email}` : `Banned ${user.email}`);
+        // Update local state
+        setUsers((prev) =>
+          prev.map((u) => (u.userId === user.userId ? { ...u, banned: !u.banned } : u))
+        );
+      } else {
+        toast.error(`Failed to ${action} user`);
+      }
+    } catch (error: any) {
+      toast.error(error.message || `Failed to ${action} user`);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-24 gap-4">
@@ -143,7 +182,8 @@ export function AdminPanel({ getToken }: AdminPanelProps) {
                 <th className="px-4 py-3 font-semibold text-gray-500 dark:text-gray-400">Last Name</th>
                 <th className="px-4 py-3 font-semibold text-gray-500 dark:text-gray-400">Role</th>
                 <th className="px-4 py-3 font-semibold text-gray-500 dark:text-gray-400">Company Name</th>
-                <th className="px-4 py-3 font-semibold text-gray-500 dark:text-gray-400 text-right">Action</th>
+                <th className="px-4 py-3 font-semibold text-gray-500 dark:text-gray-400">Status</th>
+                <th className="px-4 py-3 font-semibold text-gray-500 dark:text-gray-400 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -184,7 +224,7 @@ export function AdminPanel({ getToken }: AdminPanelProps) {
                         onChange={(e) => updateUserField(user.userId, 'role', e.target.value)}
                         title="User role"
                         aria-label={`Role for ${user.email}`}
-                        className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white dark:[color-scheme:dark] focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        className={selectClass}
                       >
                         {ROLE_OPTIONS.map((role) => (
                           <option key={role} value={role}>{role}</option>
@@ -199,15 +239,50 @@ export function AdminPanel({ getToken }: AdminPanelProps) {
                         placeholder="Company name"
                       />
                     </td>
+                    <td className="px-4 py-3">
+                      {user.banned ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 text-xs font-semibold rounded-full">
+                          <Ban className="w-3 h-3" />
+                          Banned
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 text-xs font-semibold rounded-full">
+                          <ShieldCheck className="w-3 h-3" />
+                          Active
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-right">
-                      <button
-                        onClick={() => saveUser(user)}
-                        disabled={isSaving}
-                        className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium disabled:opacity-60"
-                      >
-                        <Save className="w-4 h-4" />
-                        {isSaving ? 'Saving...' : 'Save'}
-                      </button>
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => saveUser(user)}
+                          disabled={isSaving}
+                          className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium disabled:opacity-60"
+                        >
+                          <Save className="w-4 h-4" />
+                          {isSaving ? 'Saving...' : 'Save'}
+                        </button>
+                        <button
+                          onClick={() => toggleBanUser(user)}
+                          className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg text-white text-sm font-medium ${
+                            user.banned
+                              ? 'bg-green-600 hover:bg-green-700'
+                              : 'bg-red-600 hover:bg-red-700'
+                          }`}
+                        >
+                          {user.banned ? (
+                            <>
+                              <ShieldCheck className="w-4 h-4" />
+                              Unban
+                            </>
+                          ) : (
+                            <>
+                              <Ban className="w-4 h-4" />
+                              Ban
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );

@@ -412,6 +412,93 @@ app.put("/auth/profile", clerkAuth, async (req, res) => {
    ✅ TICKETING ROUTES
 ====================================== */
 
+// Public ban appeal endpoint (no auth required for banned users)
+app.post("/tickets/ban-appeal", async (req, res) => {
+  try {
+    const { email, description } = req.body || {};
+
+    if (!email || !email.trim()) {
+      return res.status(400).json({ error: "Email is required" });
+    }
+
+    if (!description || !description.trim()) {
+      return res.status(400).json({ error: "Description is required" });
+    }
+
+    // Try to find user in Clerk by email to get userId
+    let userId = "";
+    let userName = email;
+    try {
+      const users = await clerkClient.users.getUserList({ emailAddress: [email] });
+      if (users && users.data && users.data.length > 0) {
+        const user = users.data[0];
+        userId = user.id;
+        userName = user.firstName && user.lastName
+          ? `${user.firstName} ${user.lastName}`
+          : user.firstName || user.username || email;
+      }
+    } catch (err) {
+      console.warn("Could not fetch user from Clerk for ban appeal:", err.message);
+    }
+
+    const ticket = await Ticket.create({
+      title: `Ban Appeal - ${email}`,
+      description: description.trim(),
+      category: "ban_appeal",
+      priority: "high",
+      status: "OPEN",
+      createdBy: {
+        userId: userId || "UNKNOWN",
+        email: email.trim(),
+        name: userName,
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      comments: [],
+    });
+
+    // Notify admins about the new ban appeal
+    try {
+      const adminUsers = await clerkClient.users.getUserList({ limit: 500 });
+      const admins = (adminUsers.data || adminUsers || []).filter(
+        (u) => u.publicMetadata?.role === "ADMIN"
+      );
+
+      for (const admin of admins) {
+        const adminEmail = admin.emailAddresses?.[0]?.emailAddress;
+        if (!adminEmail) continue;
+
+        await Notification.create({
+          userId: admin.id,
+          email: adminEmail,
+          type: "BAN_APPEAL",
+          title: "New Ban Appeal Submitted",
+          message: `User ${email} has submitted a ban appeal. Please review.`,
+          priority: "high",
+          read: false,
+        });
+      }
+    } catch (notifErr) {
+      console.error("Failed to notify admins about ban appeal:", notifErr.message);
+    }
+
+    publishRealtimeUpdate("ticket.created", { ticketId: ticket._id.toString(), type: "ban_appeal" });
+
+    res.status(201).json({
+      success: true,
+      message: "Ban appeal submitted successfully. An administrator will review your request.",
+      ticket: {
+        id: ticket._id,
+        title: ticket.title,
+        status: ticket.status,
+      }
+    });
+  } catch (err) {
+    console.error("❌ Ban appeal error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Create a ticket (all authenticated users)
 app.post("/tickets", clerkAuth, async (req, res) => {
   try {

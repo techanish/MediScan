@@ -70,6 +70,9 @@ export function TransferOwnership({ medicines, getToken, onTransfer, userEmail }
   const selectedMedicine = medicines.find(m => m.batchID === selectedBatch);
   const selectedCompany = companies.find(c => c.email === selectedCompanyEmail);
 
+  // Consistent dropdown styling from Tickets page
+  const selectTriggerClass = 'w-full border-gray-200/80 dark:border-gray-600/80 bg-gradient-to-b from-white to-gray-50 dark:from-gray-700 dark:to-gray-800 text-gray-800 dark:text-gray-100 shadow-sm';
+
   useEffect(() => {
     const loadCompanies = async () => {
       try {
@@ -146,7 +149,7 @@ export function TransferOwnership({ medicines, getToken, onTransfer, userEmail }
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Select Batch</label>
                 <Select value={selectedBatch} onValueChange={setSelectedBatch}>
-                  <SelectTrigger className="w-full px-4 py-6 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 text-gray-900 dark:text-gray-100">
+                  <SelectTrigger className={selectTriggerClass}>
                     <SelectValue placeholder="Select a batch..." />
                   </SelectTrigger>
                   <SelectContent>
@@ -169,7 +172,7 @@ export function TransferOwnership({ medicines, getToken, onTransfer, userEmail }
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Transfer To Company</label>
                 <Select value={selectedCompanyEmail} onValueChange={setSelectedCompanyEmail} disabled={isLoadingCompanies}>
-                  <SelectTrigger className="w-full px-4 py-6 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 text-gray-900 dark:text-gray-100">
+                  <SelectTrigger className={selectTriggerClass}>
                     <SelectValue placeholder={isLoadingCompanies ? 'Loading companies...' : 'Select a company...'} />
                   </SelectTrigger>
                   <SelectContent>

@@ -19,6 +19,9 @@ interface QrCodeGeneratorProps {
 export function QrCodeGenerator({ medicines }: QrCodeGeneratorProps) {
   const [selectedBatch, setSelectedBatch] = useState('');
 
+  // Consistent dropdown styling from Tickets page
+  const selectTriggerClass = 'w-full border-gray-200/80 dark:border-gray-600/80 bg-gradient-to-b from-white to-gray-50 dark:from-gray-700 dark:to-gray-800 text-gray-800 dark:text-gray-100 shadow-sm';
+
   const selectedMedicine = medicines.find(m => m.batchID === selectedBatch);
   const qrData = selectedMedicine ? JSON.stringify({
     id: selectedMedicine.batchID,
@@ -44,7 +47,7 @@ export function QrCodeGenerator({ medicines }: QrCodeGeneratorProps) {
           <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm">
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Select Batch to Generate</label>
             <Select value={selectedBatch} onValueChange={setSelectedBatch}>
-              <SelectTrigger className="w-full px-4 py-6 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all text-gray-900 dark:text-gray-100">
+              <SelectTrigger className={selectTriggerClass}>
                 <SelectValue placeholder="Select a batch..." />
               </SelectTrigger>
               <SelectContent>

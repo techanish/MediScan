@@ -1,6 +1,13 @@
 import { useState } from 'react';
 import { ShoppingCart, Package, User, CheckCircle2, AlertCircle, Box } from 'lucide-react';
 import type { Medicine } from '../App';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './ui/select';
 
 const DEFAULT_CUSTOMER_EMAIL = 'CUSTOMER';
 
@@ -54,6 +61,9 @@ export function PurchaseMedicine({ medicines, onPurchase, userEmail }: PurchaseM
   const [customerEmail, setCustomerEmail] = useState('');
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Consistent dropdown styling from Tickets page
+  const selectTriggerClass = 'w-full border-gray-200/80 dark:border-gray-600/80 bg-gradient-to-b from-white to-gray-50 dark:from-gray-700 dark:to-gray-800 text-gray-800 dark:text-gray-100 shadow-sm';
 
   const selectedMedicine = medicines.find((m) => m.batchID === selectedBatch);
   const availableStock = selectedMedicine ? getAvailableUnits(selectedMedicine, userEmail) : 0;
@@ -139,27 +149,26 @@ export function PurchaseMedicine({ medicines, onPurchase, userEmail }: PurchaseM
 
         <div className="space-y-2">
           <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Select Medicine Batch</label>
-          <div className="relative">
-            <Package className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
-            <select
-              value={selectedBatch}
-              onChange={(e) => setSelectedBatch(e.target.value)}
-              className="w-full pl-12 pr-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all appearance-none text-slate-900 dark:text-white"
-              required
-            >
-              <option value="">-- Select a batch --</option>
+          <Select value={selectedBatch} onValueChange={setSelectedBatch}>
+            <SelectTrigger className={selectTriggerClass} aria-label="Select Medicine Batch">
+              <div className="flex items-center gap-2">
+                <Package className="w-5 h-5 text-slate-400" />
+                <SelectValue placeholder="-- Select a batch --" />
+              </div>
+            </SelectTrigger>
+            <SelectContent>
               {medicines
                 .filter((m) => {
                   const available = getAvailableUnits(m, userEmail);
                   return m.status === 'ACTIVE' && available > 0;
                 })
                 .map((medicine) => (
-                  <option key={medicine.batchID} value={medicine.batchID}>
+                  <SelectItem key={medicine.batchID} value={medicine.batchID}>
                     {medicine.batchID} - {medicine.name} ({getAvailableUnits(medicine, userEmail)} units available)
-                  </option>
+                  </SelectItem>
                 ))}
-            </select>
-          </div>
+            </SelectContent>
+          </Select>
         </div>
 
         {selectedMedicine && (
