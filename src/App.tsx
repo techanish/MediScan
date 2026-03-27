@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useUser, useAuth, SignIn, SignedIn, SignedOut } from '@clerk/clerk-react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { ShieldCheck, ScanLine, LockKeyhole } from 'lucide-react';
 import { Toaster } from 'sonner';
 import { ThemeProvider } from './components/ThemeProvider';
 import { Sidebar } from './components/Sidebar';
@@ -22,6 +23,7 @@ import { Tickets } from './components/Tickets';
 import { BannedModal } from './components/BannedModal';
 import { BanAppealForm } from './components/BanAppealForm';
 import { BanGuard } from './components/BanGuard';
+import { ThreeLoginBackground } from './components/ThreeLoginBackground';
 import { medicineAPI, blockchainAPI, authAPI } from './utils/api';
 
 export interface User {
@@ -822,42 +824,204 @@ export function App() {
   const { user: clerkUser } = useUser();
   const [showAppealForm, setShowAppealForm] = useState(false);
 
+  const loginHighlights = [
+    {
+      title: 'Chain-of-custody intelligence',
+      detail: 'Trace every medicine handoff with cryptographic evidence in one timeline.',
+      icon: ScanLine,
+    },
+    {
+      title: 'Tamper-ready operations',
+      detail: 'Detect anomalies early with transfer verification and inventory safeguards.',
+      icon: ShieldCheck,
+    },
+    {
+      title: 'Regulatory confidence',
+      detail: 'Generate audit-grade logs and compliance artifacts without manual overhead.',
+      icon: LockKeyhole,
+    },
+  ];
+
   return (
     <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme">
       <SignedOut>
-        <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
-          {showAppealForm ? (
-            <BanAppealForm
-              userEmail={clerkUser?.primaryEmailAddress?.emailAddress}
-              onClose={() => setShowAppealForm(false)}
-            />
-          ) : (
-            <div className="w-full max-w-md">
-              <div className="text-center mb-8">
-                <h1 className="text-3xl font-bold text-emerald-600 mb-2">MediScan</h1>
-                <p className="text-gray-500 dark:text-gray-400">Medicine Verification System</p>
-              </div>
-              <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 p-6">
-                <SignIn
-                  appearance={{
-                    elements: {
-                      rootBox: 'w-full',
-                      card: 'shadow-none',
-                      main: 'bg-transparent',
-                    },
-                  }}
-                />
-              </div>
-              <div className="mt-4 text-center">
-                <button
-                  onClick={() => setShowAppealForm(true)}
-                  className="text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 font-medium underline"
+        <div className="relative min-h-screen overflow-hidden bg-[#f2fff6]">
+          <ThreeLoginBackground />
+          <div className="pointer-events-none absolute inset-0 z-[1]">
+            <div className="absolute inset-0 bg-gradient-to-br from-[#f2fff7]/17 via-[#ecfff4]/11 to-[#f3fff8]/17" />
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_52%,rgba(234,255,244,0.15)_0%,rgba(238,255,247,0.06)_40%,rgba(248,255,251,0.02)_66%,rgba(248,255,251,0)_84%)]" />
+            <div className="absolute -top-28 left-1/2 h-[420px] w-[420px] -translate-x-1/2 rounded-full bg-emerald-200/10 blur-3xl" />
+          </div>
+
+          <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-7xl items-center px-3 py-4 sm:px-6 sm:py-6 lg:px-10">
+            {showAppealForm ? (
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, ease: 'easeOut' }}
+              className="mx-auto w-full max-w-2xl rounded-[32px] border border-emerald-200/70 bg-white/95 p-3 shadow-[0_28px_90px_-36px_rgba(16,185,129,0.55)] backdrop-blur-sm sm:p-5"
+            >
+              <BanAppealForm
+                userEmail={clerkUser?.primaryEmailAddress?.emailAddress}
+                onClose={() => setShowAppealForm(false)}
+              />
+            </motion.div>
+            ) : (
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, ease: 'easeOut' }}
+              className="mx-auto grid w-full max-w-md overflow-hidden rounded-[24px] border border-emerald-200/80 bg-white shadow-[0_36px_120px_-48px_rgba(6,95,70,0.55)] sm:max-w-2xl sm:rounded-[30px] lg:max-w-6xl lg:rounded-[36px] lg:grid-cols-[1.18fr_0.82fr]"
+            >
+              <section className="relative hidden overflow-hidden bg-gradient-to-br from-emerald-900 via-emerald-800 to-green-700 px-5 py-6 text-white sm:px-10 sm:py-10 lg:block lg:min-h-[680px]">
+                <div className="pointer-events-none absolute inset-0">
+                  <div className="absolute -top-24 right-0 h-64 w-64 rounded-full bg-emerald-300/20 blur-3xl" />
+                  <div className="absolute bottom-0 left-0 h-52 w-72 bg-gradient-to-r from-black/25 to-transparent" />
+                  <div className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-emerald-950/35 to-transparent" />
+                </div>
+
+                <div className="relative z-10 flex h-full min-w-0 flex-col">
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.45, delay: 0.08 }}
+                    className="inline-flex w-fit max-w-full items-center gap-2 rounded-full border border-white/30 bg-white/10 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.13em] sm:px-4 sm:text-[11px] sm:tracking-[0.18em]"
+                  >
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                    MediScan Secure Access
+                  </motion.div>
+
+                  <motion.h1
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.5, delay: 0.16 }}
+                    className="mt-6 max-w-xl text-balance font-['Fraunces','Cambria',serif] text-[2.55rem] leading-[1.03] sm:mt-7 sm:text-[3.35rem]"
+                  >
+                    Authentic medicine starts with trusted identity.
+                  </motion.h1>
+
+                  <motion.p
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.5, delay: 0.24 }}
+                    className="mt-4 max-w-lg text-sm leading-relaxed text-emerald-50/95 sm:text-base"
+                  >
+                    Join your protected workspace to verify provenance, monitor transfers, and maintain high-confidence pharmaceutical operations.
+                  </motion.p>
+
+                  <div className="mt-7 grid gap-3">
+                    {loginHighlights.map((item, index) => {
+                      const Icon = item.icon;
+                      return (
+                        <motion.div
+                          key={item.title}
+                          initial={{ opacity: 0, y: 12 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.4, delay: 0.3 + index * 0.1 }}
+                          className="rounded-2xl border border-white/20 bg-white/10 p-3.5 backdrop-blur-sm sm:p-4"
+                        >
+                          <div className="flex min-w-0 items-start gap-3">
+                            <span className="rounded-xl border border-white/25 bg-white/20 p-2">
+                              <Icon className="h-4 w-4" />
+                            </span>
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-white break-words">{item.title}</p>
+                              <p className="mt-1 text-xs leading-relaxed text-emerald-50/95">{item.detail}</p>
+                            </div>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+
+                  <motion.div
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.45, delay: 0.58 }}
+                    className="mt-6 grid grid-cols-2 gap-3 pt-3 sm:mt-auto sm:grid-cols-3 sm:pt-7"
+                  >
+                    <div className="rounded-2xl border border-white/20 bg-white/10 p-3 text-center">
+                      <p className="font-['Fraunces','Cambria',serif] text-xl">24/7</p>
+                      <p className="mt-1 text-[11px] uppercase tracking-[0.14em] text-emerald-100/90">Monitoring</p>
+                    </div>
+                    <div className="rounded-2xl border border-white/20 bg-white/10 p-3 text-center">
+                      <p className="font-['Fraunces','Cambria',serif] text-xl">99.9%</p>
+                      <p className="mt-1 text-[11px] uppercase tracking-[0.14em] text-emerald-100/90">Integrity</p>
+                    </div>
+                    <div className="col-span-2 rounded-2xl border border-white/20 bg-white/10 p-3 text-center sm:col-span-1">
+                      <p className="font-['Fraunces','Cambria',serif] text-xl">256-bit</p>
+                      <p className="mt-1 text-[11px] uppercase tracking-[0.14em] text-emerald-100/90">Secure Auth</p>
+                    </div>
+                  </motion.div>
+                </div>
+              </section>
+
+              <section className="relative flex items-center bg-gradient-to-b from-[#ffffff] to-[#f1fff6] px-4 py-6 sm:px-8 sm:py-7 lg:px-10">
+                <div className="pointer-events-none absolute left-1/2 top-0 h-32 w-40 -translate-x-1/2 rounded-full bg-emerald-200/35 blur-2xl" />
+                <motion.div
+                  initial={{ opacity: 0, y: 14 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.45, delay: 0.22 }}
+                  className="relative z-10 mx-auto w-full max-w-md"
                 >
-                  Account Banned? Submit an Appeal
-                </button>
-              </div>
-            </div>
-          )}
+                  <p className="text-center font-['Space_Grotesk','Segoe_UI',sans-serif] text-2xl font-bold text-emerald-700 sm:text-3xl">
+                    Welcome Back
+                  </p>
+                  <p className="mt-2 px-2 text-center text-sm leading-snug text-emerald-700/75 sm:px-0">
+                    Sign in to continue to your verification command center
+                  </p>
+
+                  <div className="mt-5 rounded-[28px] border border-emerald-100 bg-white/95 p-4 shadow-[0_20px_60px_-30px_rgba(5,150,105,0.6)] sm:p-6">
+                    <SignIn
+                      appearance={{
+                        variables: {
+                          colorPrimary: '#047857',
+                          colorText: '#065f46',
+                          colorTextSecondary: '#166534',
+                          colorInputText: '#064e3b',
+                          colorBackground: '#ffffff',
+                          colorNeutral: '#d1fae5',
+                          colorDanger: '#dc2626',
+                          borderRadius: '0.95rem',
+                          fontFamily: 'Space Grotesk, Segoe UI, sans-serif',
+                        },
+                        elements: {
+                          rootBox: 'w-full',
+                          card: 'shadow-none border-0 bg-transparent p-0',
+                          main: 'bg-transparent gap-5',
+                          headerTitle: 'text-emerald-700 text-xl font-bold',
+                          headerSubtitle: 'text-emerald-700/70',
+                          formFieldLabel: 'text-emerald-800 font-medium',
+                          formFieldInput:
+                            'border border-emerald-200 bg-emerald-50/55 text-emerald-900 placeholder:text-emerald-600/65 focus:border-emerald-600 focus:ring-emerald-600',
+                          formButtonPrimary:
+                            'bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white shadow-[0_14px_30px_-16px_rgba(4,120,87,0.8)]',
+                          footerActionLink: 'text-emerald-700 hover:text-emerald-800 font-semibold',
+                          dividerText: 'text-emerald-700/65',
+                          dividerLine: 'bg-emerald-100',
+                          socialButtonsBlockButton:
+                            'border border-emerald-200 bg-white text-emerald-800 hover:bg-emerald-50 hover:text-emerald-900',
+                          socialButtonsBlockButtonText: 'font-semibold !text-emerald-800',
+                          socialButtonsProviderIcon: 'opacity-100',
+                          socialButtonsBlockButtonArrow: 'text-emerald-700',
+                        },
+                      }}
+                    />
+                  </div>
+
+                  <div className="mt-5 text-center">
+                    <button
+                      onClick={() => setShowAppealForm(true)}
+                      className="text-sm font-semibold text-emerald-700 underline decoration-emerald-400 underline-offset-[3px] transition hover:text-emerald-800"
+                    >
+                      Account banned? Submit an appeal
+                    </button>
+                  </div>
+                </motion.div>
+              </section>
+            </motion.div>
+            )}
+          </div>
         </div>
       </SignedOut>
       <SignedIn>
