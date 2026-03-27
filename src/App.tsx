@@ -848,20 +848,6 @@ export function App() {
                   }}
                 />
               </div>
-              <div className="mt-6 p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-900/30 rounded-xl">
-                <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-300 mb-2">Setting Up User Roles</p>
-                <p className="text-xs text-emerald-800 dark:text-emerald-400 mb-2">
-                  After signing up, set your role in Clerk Dashboard:
-                </p>
-                <ol className="text-xs text-emerald-800 dark:text-emerald-400 space-y-1 ml-4 list-decimal">
-                  <li>Go to Clerk Dashboard → Users</li>
-                  <li>Click on your user → Metadata tab</li>
-                  <li>Add to Public Metadata: <code className="bg-emerald-100 dark:bg-emerald-900/50 px-1 rounded">{"{ \"role\": \"MANUFACTURER\" }"}</code></li>
-                </ol>
-                <p className="text-xs text-emerald-700 dark:text-emerald-500 mt-2">
-                  Available roles: MANUFACTURER, DISTRIBUTOR, PHARMACY, CUSTOMER, ADMIN
-                </p>
-              </div>
               <div className="mt-4 text-center">
                 <button
                   onClick={() => setShowAppealForm(true)}
