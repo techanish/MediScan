@@ -20,6 +20,7 @@ import type { Notification } from './components/Notifications';
 import { Analytics } from './components/Analytics';
 import { BlockchainExplorer } from './components/BlockchainExplorer';
 import { Tickets } from './components/Tickets';
+import { CustomerPanel } from './components/CustomerPanel';
 import { BannedModal } from './components/BannedModal';
 import { BanAppealForm } from './components/BanAppealForm';
 import { BanGuard } from './components/BanGuard';
@@ -204,6 +205,7 @@ function MediScanApp() {
   const [headerSearch, setHeaderSearch] = useState('');
   const [showBannedModal, setShowBannedModal] = useState(false);
   const [banMessage, setBanMessage] = useState<string>('');
+  const [isGlobalSyncing, setIsGlobalSyncing] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -289,6 +291,9 @@ function MediScanApp() {
     if (user?.role === 'ADMIN' && activeTab === 'dashboard') {
       setActiveTab('admin');
     }
+    if (user?.role === 'CUSTOMER' && activeTab === 'dashboard') {
+      setActiveTab('customer');
+    }
   }, [user, activeTab]);
 
   const loadNotifications = useCallback(async () => {
@@ -342,6 +347,26 @@ function MediScanApp() {
   useEffect(() => {
     if (user) loadNotifications();
   }, [user, loadNotifications]);
+
+  const handleLiveSync = useCallback(async () => {
+    if (isGlobalSyncing || !user) return;
+    setIsGlobalSyncing(true);
+    try {
+      // Trigger a generic event so children like CustomerPanel can listen to it
+      window.dispatchEvent(new Event('mediscan:global-sync'));
+      
+      // Also load generic data
+      await Promise.all([
+        loadMedicines({ silent: true }),
+        loadNotifications(),
+      ]);
+      
+      // Small artificial delay for visual feedback
+      await new Promise(r => setTimeout(r, 800));
+    } finally {
+      setIsGlobalSyncing(false);
+    }
+  }, [user, isGlobalSyncing, loadMedicines, loadNotifications]);
 
   useEffect(() => {
     if (!user) return;
@@ -693,14 +718,22 @@ function MediScanApp() {
     }
   };
 
+  let currentTab = activeTab;
+  if (activeTab === 'dashboard') {
+    if (user?.role === 'CUSTOMER') currentTab = 'customer';
+    if (user?.role === 'ADMIN') currentTab = 'admin';
+  }
+
   const renderContent = () => {
     if (!user) return null;
 
-    if (user.role === 'ADMIN' && activeTab === 'admin') {
+    if (user.role === 'ADMIN' && currentTab === 'admin') {
       return <AdminManagementPanel getToken={getToken} />;
     }
 
-    switch (activeTab) {
+    switch (currentTab) {
+      case 'customer':
+        return <CustomerPanel user={user} getToken={getToken} />;
       case 'dashboard':
         return <Dashboard medicines={medicines} user={user} />;
       case 'inventory':
@@ -733,15 +766,12 @@ function MediScanApp() {
   };
 
   const getTitle = () => {
-    if (user?.role === 'ADMIN') {
+    if (user?.role === 'ADMIN' && currentTab === 'admin') {
       return 'System Administration';
     }
 
-    if (activeTab === 'admin') {
-      return 'Dashboard';
-    }
-
     const titles: Record<string, string> = {
+      customer: 'Customer Panel',
       dashboard: 'Dashboard',
       inventory: 'Inventory Management',
       register: 'Register Medicine',
@@ -756,7 +786,7 @@ function MediScanApp() {
       analytics: 'Analytics',
       tickets: 'Support Tickets',
     };
-    return titles[activeTab] || 'Dashboard';
+    return titles[currentTab] || 'Dashboard';
   };
 
   if (!isLoaded || !user) {
@@ -782,7 +812,7 @@ function MediScanApp() {
 
       <Sidebar
         user={user}
-        activeTab={activeTab}
+        activeTab={currentTab}
         setActiveTab={setActiveTab}
         isOpen={isSidebarOpen}
         setIsOpen={setIsSidebarOpen}
@@ -797,14 +827,19 @@ function MediScanApp() {
           onNotificationClick={() => setActiveTab('notifications')}
           searchValue={headerSearch}
           onSearchChange={setHeaderSearch}
-          onSearchSubmit={() => { if (headerSearch.trim()) { setActiveTab('inventory'); } }}
+          onSearchSubmit={() => {
+            if (!headerSearch.trim()) return;
+            setActiveTab(user.role === 'CUSTOMER' ? 'customer' : 'inventory');
+          }}
+          onLiveSync={user ? handleLiveSync : undefined}
+          isSyncing={isGlobalSyncing}
         />
 
         <main className="flex-1 overflow-y-auto p-4 lg:p-8">
           <div className="max-w-7xl mx-auto">
             <AnimatePresence mode="wait">
               <motion.div
-                key={activeTab}
+                key={currentTab}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}

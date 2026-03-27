@@ -6,6 +6,7 @@ const crypto = require("crypto");
 const { clerkClient } = require("@clerk/clerk-sdk-node");
 
 const Medicine = require("./models/Medicine");
+const CustomerMedicine = require("./models/CustomerMedicine");
 const ScanLog = require("./models/ScanLog");
 const Notification = require("./models/Notification");
 const Ticket = require("./models/Ticket");
@@ -187,6 +188,186 @@ function parseBlockchainTimestamp(rawTimestamp, fallbackDate) {
   if (!Number.isFinite(parsed)) return fallbackDate;
   // Python service currently returns unix seconds, but keep this resilient if it changes.
   return new Date(parsed < 1e12 ? parsed * 1000 : parsed);
+}
+
+function escapeRegex(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function parseBatchInput(rawInput) {
+  const text = String(rawInput || "").trim();
+  if (!text) return "";
+
+  if (text.startsWith("{") && text.endsWith("}")) {
+    try {
+      const parsed = JSON.parse(text);
+      const batchFromJson = String(parsed.batchID || parsed.batchId || parsed.id || "").trim();
+      if (batchFromJson) return batchFromJson;
+    } catch {
+      // Ignore parse errors and continue.
+    }
+  }
+
+  try {
+    const parsedUrl = new URL(text, "http://localhost");
+    const batchFromParams =
+      String(parsedUrl.searchParams.get("batchID") || parsedUrl.searchParams.get("batchId") || parsedUrl.searchParams.get("id") || "").trim();
+    if (batchFromParams) return batchFromParams;
+
+    const verifyPathMatch = parsedUrl.pathname.match(/\/medicine\/verify\/([^/?#]+)/i);
+    if (verifyPathMatch && verifyPathMatch[1]) {
+      return decodeURIComponent(verifyPathMatch[1]).trim();
+    }
+  } catch {
+    // Not a URL, fallback below.
+  }
+
+  return text;
+}
+
+function getHistoryTime(entry) {
+  return new Date(entry.time || entry.date || Date.now());
+}
+
+function buildChainOfCustody(medicine) {
+  const history = Array.isArray(medicine.ownerHistory) ? [...medicine.ownerHistory] : [];
+  history.sort((a, b) => getHistoryTime(a) - getHistoryTime(b));
+
+  return history
+    .filter((entry) => ["REGISTERED", "TRANSFERRED", "PURCHASED", "BLOCKED", "RECALLED"].includes(String(entry.action || "")))
+    .map((entry, index) => ({
+      step: index + 1,
+      action: String(entry.action || "UNKNOWN"),
+      actor: String(entry.owner || "UNKNOWN"),
+      role: String(entry.role || "UNKNOWN"),
+      from: String(entry.from || ""),
+      fromLocation: String(entry.fromLocation || ""),
+      toLocation: String(entry.ownerLocation || ""),
+      timestamp: getHistoryTime(entry).toISOString(),
+      blockchain: {
+        status: String(entry.blockchainStatus || ""),
+        index: entry.blockchainIndex,
+        hash: String(entry.blockchainHash || ""),
+      },
+    }));
+}
+
+function detectCustodyAnomalies(medicine, chain, trustScore, externalRegistryValid, tamperValid) {
+  const anomalies = [];
+  const rolesInChain = new Set(chain.map((step) => String(step.role || "").toUpperCase()));
+  const expectedRoles = ["MANUFACTURER", "DISTRIBUTOR", "PHARMACY", "CUSTOMER"];
+  const missingRoles = expectedRoles.filter((role) => !rolesInChain.has(role));
+
+  if (missingRoles.length > 0) {
+    anomalies.push(`Missing custody steps: ${missingRoles.join(", ")}`);
+  }
+
+  if (["BLOCKED", "RECALLED"].includes(String(medicine.status || ""))) {
+    anomalies.push(`Medicine status is ${medicine.status}`);
+  }
+
+  if (trustScore < 70) {
+    anomalies.push("AI trust score indicates elevated counterfeit risk");
+  }
+
+  if (externalRegistryValid === false) {
+    anomalies.push("External registry validation failed");
+  }
+
+  if (tamperValid === false) {
+    anomalies.push("Tamper packaging validation failed");
+  }
+
+  const transferSteps = chain.filter((step) => step.action === "TRANSFERRED");
+  const missingBlockchainProof = transferSteps.some((step) => !step.blockchain.hash);
+  if (missingBlockchainProof) {
+    anomalies.push("Some transfer steps do not have blockchain hash evidence");
+  }
+
+  return anomalies;
+}
+
+function deriveUsageGuidance(medicine) {
+  const dosage = String(medicine.dosage || "").trim();
+  if (dosage) {
+    return `Use as prescribed: ${dosage}. Do not exceed the prescribed dose.`;
+  }
+  return "Follow your prescription label and pharmacist instructions before use.";
+}
+
+function deriveSideEffects(medicine) {
+  const category = String(medicine.category || "").toLowerCase();
+  if (category.includes("antibiotic")) return "Possible nausea, diarrhea, or mild rash.";
+  if (category.includes("pain")) return "Possible drowsiness, gastric irritation, or dizziness.";
+  if (category.includes("antiviral")) return "Possible headache, fatigue, or mild stomach upset.";
+  return "Monitor for unusual symptoms and stop use if severe reactions occur.";
+}
+
+function derivePrecautions(medicine) {
+  const name = String(medicine.name || "this medicine");
+  return `Before taking ${name}, check allergies, chronic conditions, and potential interactions with your doctor.`;
+}
+
+function buildDosageReminderText(medicine) {
+  const dosage = String(medicine.dosage || "").trim();
+  if (!dosage) return "Take medicine exactly as prescribed.";
+  return `Reminder: ${medicine.name} dosage ${dosage}.`;
+}
+
+function buildAssistantResponse(message, ownedMedicines) {
+  const text = String(message || "").toLowerCase();
+  const trackedNames = ownedMedicines.map((med) => med.name).filter(Boolean);
+  const mentionedMedicines = trackedNames.filter((name) => text.includes(String(name).toLowerCase())).slice(0, 3);
+
+  const emergencySignals = ["chest pain", "severe", "bleeding", "faint", "anaphyl", "suicide", "overdose"];
+  const hasEmergencySignal = emergencySignals.some((signal) => text.includes(signal));
+
+  if (hasEmergencySignal) {
+    return {
+      answer:
+        "This may be an emergency. Seek immediate medical care or call your local emergency number now. Do not delay treatment.",
+      emergency: true,
+      suggestions: [
+        "Consult doctor immediately",
+        "Call emergency services",
+        "Do not self-medicate further until reviewed",
+      ],
+    };
+  }
+
+  let answer = "I can help with safe medicine guidance based on your tracked medicines.";
+
+  if (text.includes("interaction") || text.includes("combine") || text.includes("together")) {
+    answer =
+      "Drug interaction checks should be confirmed with a pharmacist or doctor. Share all active medicines and supplements before combining treatments.";
+  } else if (text.includes("dosage") || text.includes("dose")) {
+    answer =
+      "Use only the prescribed dose. If a dose is missed, follow the medicine leaflet guidance and never double-dose unless your clinician advises it.";
+  } else if (text.includes("side effect") || text.includes("reaction")) {
+    answer =
+      "Common side effects can include mild nausea, dizziness, or fatigue depending on medicine type. Seek care quickly for breathing trouble, swelling, severe rash, or persistent vomiting.";
+  } else if (text.includes("how") || text.includes("when") || text.includes("take")) {
+    answer =
+      "Take medicine as labeled with appropriate timing around meals/hydration when required. If instructions conflict, rely on your doctor/pharmacist direction.";
+  }
+
+  if (mentionedMedicines.length > 0) {
+    answer += `\n\nYou mentioned: ${mentionedMedicines.join(", ")}. I can provide more specific guidance per medicine if you share the exact question.`;
+  }
+
+  return {
+    answer,
+    emergency: false,
+    suggestions: [
+      "Review leaflet instructions",
+      "Consult pharmacist for interactions",
+      "Consult doctor for persistent symptoms",
+    ],
+  };
 }
 
 function publishRealtimeUpdate(eventType, payload = {}) {
@@ -2372,6 +2553,394 @@ app.get("/analytics/low-stock", clerkAuth, async (req, res) => {
       medicines 
     });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ======================================
+   ✅ CUSTOMER EXPERIENCE ROUTES
+====================================== */
+
+// Customer: Purchased medicines auto-fetched via pharmacy -> customer mapping.
+app.get("/customer/purchased", clerkAuth, authorizeRoles("CUSTOMER"), async (req, res) => {
+  try {
+    const customerEmail = normalizeEmail(req.user.email);
+    const emailRegex = new RegExp(`^${escapeRegex(customerEmail)}$`, "i");
+
+    const medicines = await Medicine.find({
+      ownerHistory: {
+        $elemMatch: {
+          action: "PURCHASED",
+          owner: emailRegex,
+        },
+      },
+    }).sort({ updatedAt: -1 });
+
+    const ownedDocs = await CustomerMedicine.find({ customerEmail }).select("batchID verificationStatus");
+    const ownedMap = new Map(ownedDocs.map((doc) => [String(doc.batchID), String(doc.verificationStatus || "VERIFIED")]));
+
+    const latestPurchaseByBatch = new Map();
+
+    medicines.forEach((medicine) => {
+      const customerPurchases = (medicine.ownerHistory || [])
+        .filter(
+          (entry) =>
+            String(entry.action || "") === "PURCHASED" &&
+            normalizeEmail(entry.owner) === customerEmail
+        )
+        .sort((a, b) => getHistoryTime(b) - getHistoryTime(a));
+
+      if (customerPurchases.length === 0) return;
+
+      const latestPurchase = customerPurchases[0];
+      const sellerEmail = String(latestPurchase.from || "").trim();
+      const sellerRole =
+        String(
+          [...(medicine.ownerHistory || [])]
+            .reverse()
+            .find((entry) => normalizeEmail(entry.owner) === normalizeEmail(sellerEmail))?.role || "PHARMACY"
+        ).toUpperCase();
+
+      latestPurchaseByBatch.set(medicine.batchID, {
+        batchID: medicine.batchID,
+        name: medicine.name,
+        manufacturer: medicine.manufacturer,
+        purchaseDate: getHistoryTime(latestPurchase).toISOString(),
+        unitsPurchased: Number(latestPurchase.unitsPurchased || 0),
+        pharmacy: {
+          email: sellerEmail || "UNKNOWN",
+          role: sellerRole,
+          location: String(latestPurchase.fromLocation || ""),
+        },
+        ownershipStatus:
+          sellerEmail && sellerEmail !== DEFAULT_CUSTOMER_EMAIL
+            ? "Verified"
+            : "Unverified",
+        status: medicine.status,
+        addedToOwned: ownedMap.has(medicine.batchID),
+      });
+    });
+
+    const purchased = [...latestPurchaseByBatch.values()].sort(
+      (a, b) => new Date(b.purchaseDate) - new Date(a.purchaseDate)
+    );
+
+    res.json({
+      success: true,
+      count: purchased.length,
+      purchased,
+    });
+  } catch (err) {
+    console.error("❌ Customer purchased fetch error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Customer: Add an owned medicine after authenticity validation.
+app.post("/customer/owned", clerkAuth, authorizeRoles("CUSTOMER"), async (req, res) => {
+  try {
+    const customerEmail = normalizeEmail(req.user.email);
+    const rawBatchID = req.body?.batchID;
+    const batchID = parseBatchInput(rawBatchID);
+    const addedVia = String(req.body?.addedVia || "MANUAL").toUpperCase();
+
+    if (!batchID) {
+      return res.status(400).json({ error: "Batch ID is required" });
+    }
+
+    const medicine = await Medicine.findOne({
+      batchID: new RegExp(`^${escapeRegex(batchID)}$`, "i"),
+    });
+
+    if (!medicine) {
+      return res.status(404).json({
+        error: "Medicine not found in registry",
+        message: "Authenticity validation failed. Unable to add medicine.",
+      });
+    }
+
+    if (["BLOCKED", "RECALLED"].includes(String(medicine.status || ""))) {
+      return res.status(400).json({
+        error: `Medicine status is ${medicine.status}`,
+        message: "This medicine cannot be added because authenticity risk is high.",
+      });
+    }
+
+    const verificationStatus = Number(medicine.trustScore || 100) >= 70 ? "VERIFIED" : "SUSPICIOUS";
+
+    const owned = await CustomerMedicine.findOneAndUpdate(
+      { customerEmail, batchID: medicine.batchID },
+      {
+        customerEmail,
+        batchID: medicine.batchID,
+        medicineName: medicine.name,
+        manufacturer: medicine.manufacturer,
+        addedVia: ["SCAN_QR", "MANUAL", "PURCHASE_SYNC"].includes(addedVia) ? addedVia : "MANUAL",
+        verificationStatus,
+        verifiedAt: new Date(),
+        metadata: {
+          sourceInput: String(rawBatchID || ""),
+          status: medicine.status,
+          trustScore: Number(medicine.trustScore || 100),
+        },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    await createNotification(
+      req.user.email,
+      "SYSTEM",
+      "Medicine Added to Your Health Dashboard",
+      `${medicine.name} (Batch: ${medicine.batchID}) is now tracked in your owned medicines list.`,
+      medicine.batchID,
+      verificationStatus === "VERIFIED" ? "normal" : "high"
+    );
+
+    res.json({
+      success: true,
+      message: "Medicine added successfully",
+      owned,
+    });
+  } catch (err) {
+    console.error("❌ Customer add owned error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Customer: Get all owned medicines with reminders and safety guidance.
+app.get("/customer/owned", clerkAuth, authorizeRoles("CUSTOMER"), async (req, res) => {
+  try {
+    const customerEmail = normalizeEmail(req.user.email);
+    const ownedEntries = await CustomerMedicine.find({ customerEmail }).sort({ updatedAt: -1 }).lean();
+
+    const batchIds = [...new Set(ownedEntries.map((entry) => String(entry.batchID || "")).filter(Boolean))];
+    const medicines = await Medicine.find({ batchID: { $in: batchIds } }).lean();
+    const medicineByBatch = new Map(medicines.map((medicine) => [String(medicine.batchID), medicine]));
+
+    const now = new Date();
+
+    const ownedMedicines = ownedEntries
+      .map((entry) => {
+        const medicine = medicineByBatch.get(String(entry.batchID));
+        if (!medicine) return null;
+
+        const expDate = new Date(medicine.expDate || "");
+        const daysUntilExpiry = Number.isFinite(expDate.getTime())
+          ? Math.ceil((expDate - now) / (1000 * 60 * 60 * 24))
+          : null;
+
+        const expiryAlertLevel =
+          typeof daysUntilExpiry === "number"
+            ? daysUntilExpiry < 0
+              ? "expired"
+              : daysUntilExpiry <= 15
+                ? "critical"
+                : daysUntilExpiry <= 45
+                  ? "warning"
+                  : "ok"
+            : "unknown";
+
+        const dosageReminder = buildDosageReminderText(medicine);
+
+        return {
+          batchID: medicine.batchID,
+          name: medicine.name,
+          manufacturer: medicine.manufacturer,
+          expDate: medicine.expDate,
+          daysUntilExpiry,
+          expiryAlertLevel,
+          dosage: medicine.dosage || "Not available",
+          usageGuidelines: deriveUsageGuidance(medicine),
+          sideEffects: deriveSideEffects(medicine),
+          precautions: derivePrecautions(medicine),
+          addSource: entry.addedVia,
+          verificationStatus: entry.verificationStatus,
+          verifiedAt: entry.verifiedAt,
+          blockchainBacked: Boolean(
+            (medicine.ownerHistory || []).some((history) => String(history.blockchainHash || "").trim())
+          ),
+          reminders: {
+            expiry:
+              expiryAlertLevel === "critical" || expiryAlertLevel === "expired"
+                ? `Expiry alert: ${medicine.name} ${daysUntilExpiry < 0 ? "has expired" : `expires in ${daysUntilExpiry} day(s)`}.`
+                : "",
+            dosage: dosageReminder,
+          },
+        };
+      })
+      .filter(Boolean);
+
+    res.json({
+      success: true,
+      count: ownedMedicines.length,
+      ownedMedicines,
+    });
+  } catch (err) {
+    console.error("❌ Customer owned fetch error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Customer: Verify authenticity and return chain-of-custody diagnostics.
+app.post("/customer/verify", clerkAuth, authorizeRoles("CUSTOMER"), async (req, res) => {
+  try {
+    const batchID = parseBatchInput(req.body?.input);
+    const packagingCode = String(req.body?.packagingCode || "").trim();
+
+    if (!batchID) {
+      return res.status(400).json({ error: "Verification input is required" });
+    }
+
+    const medicine = await Medicine.findOne({
+      batchID: new RegExp(`^${escapeRegex(batchID)}$`, "i"),
+    });
+
+    if (!medicine) {
+      await ScanLog.create({
+        batchID,
+        result: "❌ NOT_FOUND",
+        scanner: req.user.email,
+        location: "CUSTOMER_PANEL",
+        deviceId: "WEB",
+        user: req.user.email,
+        anomaly: true,
+      });
+
+      return res.json({
+        success: true,
+        verified: false,
+        authenticity: false,
+        counterfeitRisk: "HIGH",
+        anomalies: ["Batch was not found in registry"],
+      });
+    }
+
+    const { checkBatchWithExternalRegistry } = require("./utils/externalApi");
+    const { verifyTamperEvidence } = require("./utils/tamperPackaging");
+
+    const externalRegistry = await checkBatchWithExternalRegistry(medicine.batchID);
+    const tamperPackaging = packagingCode ? verifyTamperEvidence(medicine.batchID, packagingCode) : null;
+    const { score, reasons } = await calculateTrustScore(medicine.batchID);
+
+    const chainOfCustody = buildChainOfCustody(medicine);
+    const anomalies = detectCustodyAnomalies(
+      medicine,
+      chainOfCustody,
+      score,
+      Boolean(externalRegistry.valid),
+      tamperPackaging
+    );
+
+    const hasCriticalAnomaly = anomalies.some((anomaly) =>
+      /status is|tamper|external registry/i.test(anomaly)
+    );
+
+    const counterfeitRisk = hasCriticalAnomaly
+      ? "HIGH"
+      : anomalies.length > 0
+        ? "MEDIUM"
+        : "LOW";
+
+    const verified = counterfeitRisk === "LOW";
+
+    await ScanLog.create({
+      batchID: medicine.batchID,
+      result: verified ? "✅ VERIFIED" : "⚠️ SUSPICIOUS",
+      scanner: req.user.email,
+      location: "CUSTOMER_PANEL",
+      deviceId: "WEB",
+      user: req.user.email,
+      anomaly: !verified,
+    });
+
+    res.json({
+      success: true,
+      verified,
+      authenticity: verified,
+      counterfeitRisk,
+      trustScore: score,
+      reasons,
+      anomalies,
+      externalRegistry,
+      tamperPackaging,
+      chainOfCustody,
+      medicine: {
+        batchID: medicine.batchID,
+        name: medicine.name,
+        manufacturer: medicine.manufacturer,
+        mfgDate: medicine.mfgDate,
+        expDate: medicine.expDate,
+        status: medicine.status,
+        dosage: medicine.dosage,
+        description: medicine.description,
+        composition: medicine.composition,
+      },
+    });
+  } catch (err) {
+    console.error("❌ Customer verify error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Customer: Scan history with status filtering.
+app.get("/customer/scans", clerkAuth, authorizeRoles("CUSTOMER"), async (req, res) => {
+  try {
+    const status = String(req.query.status || "ALL").toUpperCase();
+    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 300);
+
+    const filter = { user: req.user.email };
+    if (status === "VERIFIED") filter.anomaly = false;
+    if (status === "SUSPICIOUS") filter.anomaly = true;
+
+    const logs = await ScanLog.find(filter).sort({ time: -1 }).limit(limit).lean();
+
+    const scanHistory = logs.map((log) => ({
+      id: String(log._id),
+      batchID: log.batchID,
+      timestamp: new Date(log.time || Date.now()).toISOString(),
+      status: log.anomaly ? "SUSPICIOUS" : "VERIFIED",
+      result: log.result,
+      location: log.location || "UNKNOWN",
+      deviceId: log.deviceId || "UNKNOWN",
+    }));
+
+    res.json({
+      success: true,
+      count: scanHistory.length,
+      scanHistory,
+    });
+  } catch (err) {
+    console.error("❌ Customer scan history error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Customer: Healthcare assistant (context-aware to owned medicines).
+app.post("/customer/assistant", clerkAuth, authorizeRoles("CUSTOMER"), async (req, res) => {
+  try {
+    const message = String(req.body?.message || "").trim();
+    if (!message) {
+      return res.status(400).json({ error: "Message is required" });
+    }
+
+    const customerEmail = normalizeEmail(req.user.email);
+    const ownedEntries = await CustomerMedicine.find({ customerEmail }).select("batchID").lean();
+    const batchIds = ownedEntries.map((entry) => String(entry.batchID || "")).filter(Boolean);
+    const ownedMedicines = await Medicine.find({ batchID: { $in: batchIds } }).select("name dosage category").lean();
+
+    const assistant = buildAssistantResponse(message, ownedMedicines);
+
+    res.json({
+      success: true,
+      answer: assistant.answer,
+      emergency: assistant.emergency,
+      suggestions: assistant.suggestions,
+      context: {
+        trackedMedicines: ownedMedicines.map((medicine) => medicine.name).filter(Boolean),
+      },
+    });
+  } catch (err) {
+    console.error("❌ Customer assistant error:", err);
     res.status(500).json({ error: err.message });
   }
 });

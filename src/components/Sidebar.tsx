@@ -13,6 +13,7 @@ import {
   Users,
   Cpu,
   BarChart3,
+  HeartPulse,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { User } from '../App';
@@ -29,6 +30,7 @@ interface SidebarProps {
 
 export function Sidebar({ user, activeTab, setActiveTab, isOpen, setIsOpen, onLogout: _onLogout }: SidebarProps) {
   const menuItems = [
+    { id: 'customer', label: 'Customer Panel', icon: HeartPulse, roles: ['CUSTOMER'] },
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['ALL'] },
     { id: 'inventory', label: 'Inventory', icon: Package, roles: ['ALL'] },
     { id: 'register', label: 'Register Medicine', icon: PlusCircle, roles: ['MANUFACTURER'] },
@@ -46,9 +48,11 @@ export function Sidebar({ user, activeTab, setActiveTab, isOpen, setIsOpen, onLo
 
   const filteredItems = user.role === 'ADMIN'
     ? menuItems.filter((item) => item.id === 'admin' || item.id === 'tickets')
-    : menuItems.filter(item =>
-        item.roles.includes('ALL') || item.roles.includes(user.role)
-      );
+    : user.role === 'CUSTOMER'
+      ? menuItems.filter((item) => ['customer', 'notifications', 'tickets', 'profile'].includes(item.id))
+      : menuItems.filter(item =>
+          item.roles.includes('ALL') || item.roles.includes(user.role)
+        );
 
   return (
     <>

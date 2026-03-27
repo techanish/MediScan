@@ -434,6 +434,79 @@ export const medicineAPI = {
 };
 
 // ============================================
+// CUSTOMER API
+// ============================================
+
+export const customerAPI = {
+  /**
+   * Get medicines purchased by the current customer.
+   */
+  getPurchased: async (sessionToken: string) => {
+    return fetchAPI('/customer/purchased', {
+      headers: getAuthHeaders(sessionToken),
+    });
+  },
+
+  /**
+   * Get customer-owned medicines with reminders.
+   */
+  getOwned: async (sessionToken: string) => {
+    return fetchAPI('/customer/owned', {
+      headers: getAuthHeaders(sessionToken),
+    });
+  },
+
+  /**
+   * Add a medicine to customer-owned medicines.
+   */
+  addOwned: async (
+    sessionToken: string,
+    payload: { batchID: string; addedVia?: 'SCAN_QR' | 'MANUAL' | 'PURCHASE_SYNC' }
+  ) => {
+    return fetchAPI('/customer/owned', {
+      method: 'POST',
+      headers: getAuthHeaders(sessionToken),
+      body: JSON.stringify(payload),
+    });
+  },
+
+  /**
+   * Verify medicine authenticity and chain-of-custody.
+   */
+  verify: async (
+    sessionToken: string,
+    payload: { input: string; packagingCode?: string }
+  ) => {
+    return fetchAPI('/customer/verify', {
+      method: 'POST',
+      headers: getAuthHeaders(sessionToken),
+      body: JSON.stringify(payload),
+    });
+  },
+
+  /**
+   * Get scan history for current customer.
+   */
+  getScanHistory: async (sessionToken: string, status?: 'ALL' | 'VERIFIED' | 'SUSPICIOUS') => {
+    const query = status ? `?status=${encodeURIComponent(status)}` : '';
+    return fetchAPI(`/customer/scans${query}`, {
+      headers: getAuthHeaders(sessionToken),
+    });
+  },
+
+  /**
+   * Ask healthcare assistant.
+   */
+  askAssistant: async (sessionToken: string, message: string) => {
+    return fetchAPI('/customer/assistant', {
+      method: 'POST',
+      headers: getAuthHeaders(sessionToken),
+      body: JSON.stringify({ message }),
+    });
+  },
+};
+
+// ============================================
 // LOGS API
 // ============================================
 
@@ -506,6 +579,7 @@ export const healthAPI = {
 export default {
   auth: authAPI,
   medicine: medicineAPI,
+  customer: customerAPI,
   logs: logsAPI,
   blockchain: blockchainAPI,
   health: healthAPI,
