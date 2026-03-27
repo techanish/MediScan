@@ -1,6 +1,35 @@
 const { clerkClient } = require("@clerk/clerk-sdk-node");
 const LoginSession = require("../models/LoginSession");
 
+const VALID_ROLES = new Set(["MANUFACTURER", "DISTRIBUTOR", "PHARMACY", "CUSTOMER", "ADMIN"]);
+
+function normalizePublicMetadata(publicMetadata) {
+  const current = publicMetadata && typeof publicMetadata === "object" ? publicMetadata : {};
+  const rawRole = typeof current.role === "string" ? current.role.trim().toUpperCase() : "";
+  const role = VALID_ROLES.has(rawRole) ? rawRole : "CUSTOMER";
+  const companyName = typeof current.companyName === "string" ? current.companyName : "";
+  const hasCompanyNameSet =
+    typeof current.hasCompanyNameSet === "boolean"
+      ? current.hasCompanyNameSet
+      : companyName.trim() !== "";
+
+  const normalized = {
+    ...current,
+    role,
+    companyName,
+    hasCompanyNameSet,
+    isBanned: Boolean(current.isBanned),
+  };
+
+  const needsUpdate =
+    normalized.role !== current.role ||
+    normalized.companyName !== current.companyName ||
+    normalized.hasCompanyNameSet !== current.hasCompanyNameSet ||
+    normalized.isBanned !== current.isBanned;
+
+  return { normalized, needsUpdate };
+}
+
 function getClientIp(req) {
   const forwarded = req.headers["x-forwarded-for"];
   if (typeof forwarded === "string" && forwarded.length > 0) {
@@ -109,16 +138,29 @@ async function clerkAuth(req, res, next) {
       });
     }
     
+    const { normalized: normalizedMetadata, needsUpdate } = normalizePublicMetadata(user.publicMetadata);
+
+    // Backfill missing/default metadata once so every Clerk user has consistent keys.
+    if (needsUpdate) {
+      try {
+        await clerkClient.users.updateUser(user.id, {
+          publicMetadata: normalizedMetadata,
+        });
+      } catch (metadataErr) {
+        console.warn(`Metadata backfill failed for Clerk user ${user.id}:`, metadataErr.message);
+      }
+    }
+
     // Attach user info to request
     req.user = {
       id: user.id,
       email: primaryEmail,
       name: user.firstName && user.lastName ? `${user.firstName} ${user.lastName}` : user.firstName || user.username || 'User',
-      role: user.publicMetadata?.role || "CUSTOMER", // Role stored in Clerk user metadata
-      companyName: user.publicMetadata?.companyName || ""
+      role: normalizedMetadata.role,
+      companyName: normalizedMetadata.companyName
     };
 
-    if (user.publicMetadata?.isBanned) {
+    if (normalizedMetadata.isBanned) {
       return res.status(403).json({
         error: "Account is banned",
         message: "Please contact the administrator"
@@ -164,4 +206,4 @@ function authorizeRoles(...allowedRoles) {
   };
 }
 
-module.exports = { clerkAuth, authorizeRoles };
+module.exports = { clerkAuth, authorizeRoles, normalizePublicMetadata };

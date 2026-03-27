@@ -9,7 +9,7 @@ const Medicine = require("./models/Medicine");
 const ScanLog = require("./models/ScanLog");
 const Notification = require("./models/Notification");
 const Ticket = require("./models/Ticket");
-const { clerkAuth, authorizeRoles } = require("./middleware/clerkAuth");
+const { clerkAuth, authorizeRoles, normalizePublicMetadata } = require("./middleware/clerkAuth");
 const rateLimit = require("express-rate-limit");
 const mongoSanitize = require("express-mongo-sanitize");
 const { calculateTrustScore, computeIntegrityHash } = require("./ai/fraudDetection");
@@ -277,6 +277,18 @@ app.get("/events/stream", async (req, res) => {
     }
 
     const user = await clerkClient.users.getUser(tokenPayload.sub);
+    const { normalized: normalizedMetadata, needsUpdate } = normalizePublicMetadata(user.publicMetadata);
+
+    if (needsUpdate) {
+      try {
+        await clerkClient.users.updateUser(user.id, {
+          publicMetadata: normalizedMetadata,
+        });
+      } catch (metadataErr) {
+        console.warn(`Metadata backfill failed for Clerk user ${user.id}:`, metadataErr.message);
+      }
+    }
+
     const primaryEmail =
       (Array.isArray(user.emailAddresses) && user.emailAddresses[0]?.emailAddress) ||
       user.primaryEmailAddress?.emailAddress ||
@@ -303,7 +315,7 @@ app.get("/events/stream", async (req, res) => {
     realtimeClients.set(clientId, {
       id: clientId,
       email: primaryEmail.toLowerCase(),
-      role: user.publicMetadata?.role || "CUSTOMER",
+      role: normalizedMetadata.role,
       res,
     });
 
