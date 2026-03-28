@@ -45,6 +45,7 @@ interface CompletedSale {
   totalUnits: number;
   totalPrice: number;
   dateTime: string;
+  customerEmail: string;
 }
 
 const getAvailableUnits = (medicine: Medicine, userEmail: string): number => {
@@ -154,7 +155,7 @@ export function ProcessSale({ medicines, user, onSale, onRecordInvoice }: Proces
         totalUnits: completedSale.totalUnits,
         totalPrice: completedSale.totalPrice,
         dateTime: completedSale.dateTime,
-        customerEmail,
+        customerEmail: completedSale.customerEmail,
         blockchainExplorerUrl: explorerUrl.toString(),
       });
     } catch {
@@ -280,6 +281,7 @@ export function ProcessSale({ medicines, user, onSale, onRecordInvoice }: Proces
           totalUnits,
           totalPrice,
           dateTime,
+          customerEmail: email,
         });
 
         toast.success('Process sale completed');
