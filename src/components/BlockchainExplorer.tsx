@@ -10,6 +10,7 @@ import {
 import { blockchainAPI, companiesAPI } from '../utils/api';
 import { downloadInvoicePdf } from './Invoice';
 import type { Medicine } from '../App';
+import { formatDateTimeDayFirst, toBlockchainDate } from '../utils/time';
 
 function normalizeIdentity(value: string): string {
   return String(value || '').trim().toLowerCase();
@@ -297,7 +298,7 @@ function MedicineTracker({ chain, medicines, initialBatchID, companyByEmail }: {
                           <span className="text-xs font-bold text-gray-400 w-12">#{b.index}</span>
                           <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${getActionBadge(b.data?.action)}`}>{b.data?.action}</span>
                           <span className="font-mono text-xs text-gray-500 dark:text-gray-400 flex-1 truncate">{b.hash.slice(0, 24)}…</span>
-                          <span className="text-xs text-gray-400">{new Date(b.timestamp * 1000).toLocaleTimeString()}</span>
+                          <span className="text-xs text-gray-400">{toBlockchainDate(b.timestamp).toLocaleTimeString()}</span>
                         </div>
                       ))}
                     </div>
@@ -320,7 +321,7 @@ function MedicineTracker({ chain, medicines, initialBatchID, companyByEmail }: {
 
 /* ─────────────── Block Row ─────────────── */
 function BlockRow({ block, isGenesis, onClick, companyByEmail }: { block: Block; isGenesis: boolean; onClick: () => void; companyByEmail: Record<string, string> }) {
-  const date = new Date(block.timestamp * 1000);
+  const date = toBlockchainDate(block.timestamp);
   const tx = extractTransferFields(block.data);
   const action = tx.action;
   const from = tx.from;
@@ -376,7 +377,7 @@ function BlockRow({ block, isGenesis, onClick, companyByEmail }: { block: Block;
 
 /* ─────────────── Block Detail Panel ─────────────── */
 function BlockDetail({ block, chain, companyByEmail, onClose, onSelectBlock }: { block: Block; chain: Block[]; companyByEmail: Record<string, string>; onClose: () => void; onSelectBlock?: (block: Block) => void }) {
-  const date = new Date(block.timestamp * 1000);
+  const date = toBlockchainDate(block.timestamp);
   const status = statusIndicator(block.data);
   const batchId = getBatchIdFromBlock(block);
   const tx = extractTransferFields(block.data);
@@ -398,7 +399,7 @@ function BlockDetail({ block, chain, companyByEmail, onClose, onSelectBlock }: {
         { label: 'Item Count', val: String(Array.isArray(invoicePayload.items) ? invoicePayload.items.length : 0), mono: false },
         { label: 'Total Units', val: String(invoicePayload.totalUnits ?? tx.units ?? 'N/A'), mono: false },
         { label: 'Total Price', val: Number.isFinite(Number(invoicePayload.totalPrice)) ? `INR ${Number(invoicePayload.totalPrice).toFixed(2)}` : 'N/A', mono: false },
-        { label: 'Invoice Date', val: String(invoicePayload.dateTime || 'N/A'), mono: false },
+        { label: 'Invoice Date', val: formatDateTimeDayFirst(String(invoicePayload.dateTime || date.toISOString())), mono: false },
         { label: 'Explorer Link', val: String(invoicePayload.blockchainExplorerUrl || tx.payloadHash || 'N/A'), mono: true },
       ]
     : [
@@ -426,7 +427,7 @@ function BlockDetail({ block, chain, companyByEmail, onClose, onSelectBlock }: {
         items: Array.isArray(invoicePayload.items) ? invoicePayload.items : [],
         totalUnits: Number(invoicePayload.totalUnits || 0),
         totalPrice: Number(invoicePayload.totalPrice || 0),
-        dateTime: String(invoicePayload.dateTime || date.toLocaleString()),
+        dateTime: formatDateTimeDayFirst(String(invoicePayload.dateTime || date.toISOString())),
         customerEmail: String(invoicePayload.customerEmail || block.data?.soldTo || ''),
         blockchainExplorerUrl: String(explorerUrl),
       });

@@ -3,6 +3,7 @@ import { AlertCircle, CheckCircle2, Download, IndianRupee, Mail, Package2, Plus,
 import type { Medicine, User } from '../App';
 import { downloadInvoicePdf } from './Invoice';
 import { toast } from 'sonner';
+import { formatDateTimeDayFirst } from '../utils/time';
 import {
   Select,
   SelectContent,
@@ -241,7 +242,7 @@ export function ProcessSale({ medicines, user, onSale, onRecordInvoice }: Proces
     try {
       setIsLoading(true);
       const transactionId = createTransactionId();
-      const dateTime = new Date().toLocaleString();
+      const dateTime = formatDateTimeDayFirst(new Date());
       const explorerUrl = new URL(window.location.href);
       explorerUrl.searchParams.set('tab', 'blockchain');
       explorerUrl.searchParams.set('tx', transactionId);

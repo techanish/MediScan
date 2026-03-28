@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '@clerk/clerk-react';
 import { Link2, Hash, Clock, Database, RefreshCw, ShieldCheck } from 'lucide-react';
 import { blockchainAPI } from '../utils/api';
+import { toBlockchainDate } from '../utils/time';
 
 interface Block {
   index: number;
@@ -116,7 +117,7 @@ export function BlockchainViewer() {
 
 function BlockCard({ block, isGenesis }: { block: Block; isGenesis: boolean }) {
   const [expanded, setExpanded] = useState(false);
-  const date = new Date(block.timestamp * 1000);
+  const date = toBlockchainDate(block.timestamp);
 
   return (
     <div
