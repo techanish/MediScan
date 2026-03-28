@@ -26,6 +26,7 @@ import { BanAppealForm } from './components/BanAppealForm';
 import { BanGuard } from './components/BanGuard';
 import { ThreeLoginBackground } from './components/ThreeLoginBackground';
 import { medicineAPI, blockchainAPI, authAPI } from './utils/api';
+import { fetchWithApiBaseFallback, getApiBaseCandidates, resolveApiUrl } from './utils/apiBase';
 
 export interface User {
   name: string;
@@ -82,27 +83,15 @@ export interface Medicine {
   updatedAt?: string;
 }
 
-const RAW_API_BASE = (import.meta.env.VITE_API_URL || '').trim().replace(/\/$/, '');
 const APP_SYNC_FALLBACK_INTERVAL_MS = 30000;
+const API_BASE_CANDIDATES = getApiBaseCandidates(import.meta.env.VITE_API_URL);
 
-function getApiBase(): string {
-  if (!RAW_API_BASE) return '';
-  if (typeof window === 'undefined') return RAW_API_BASE;
-
-  const runningOnLocalHost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
-  const pointsToLocalHost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(RAW_API_BASE);
-
-  // Safety: ignore localhost API URL in deployed environments.
-  if (!runningOnLocalHost && pointsToLocalHost) {
-    return '';
-  }
-  return RAW_API_BASE;
+function buildApiUrl(endpoint: string, apiBase = API_BASE_CANDIDATES[0] || ''): string {
+  return resolveApiUrl(endpoint, apiBase);
 }
 
-const API_BASE = getApiBase();
-
-function buildApiUrl(endpoint: string): string {
-  return API_BASE ? `${API_BASE}${endpoint}` : endpoint;
+async function fetchApiWithFallback(endpoint: string, init: RequestInit): Promise<Response> {
+  return fetchWithApiBaseFallback(endpoint, init, API_BASE_CANDIDATES);
 }
 
 function mapNotificationType(type: string, priority: string): 'ALERT' | 'INFO' | 'SUCCESS' | 'WARNING' {
@@ -300,7 +289,7 @@ function MediScanApp() {
     try {
       const token = await getToken();
       if (!token) return;
-      const response = await fetch(buildApiUrl('/notifications'), {
+      const response = await fetchApiWithFallback('/notifications', {
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -420,13 +409,15 @@ function MediScanApp() {
     let source: EventSource | null = null;
     let reconnectTimer: number | null = null;
     let stopped = false;
+    let apiBaseIndex = 0;
 
     const connect = async () => {
       try {
         const token = await getToken();
         if (!token || stopped) return;
 
-        source = new EventSource(`${buildApiUrl('/events/stream')}?token=${encodeURIComponent(token)}`);
+        const apiBase = API_BASE_CANDIDATES[apiBaseIndex] || '';
+        source = new EventSource(`${buildApiUrl('/events/stream', apiBase)}?token=${encodeURIComponent(token)}`);
 
         source.addEventListener('app-update', () => {
           window.dispatchEvent(new Event('mediscan:realtime-update'));
@@ -435,6 +426,7 @@ function MediScanApp() {
         source.onerror = () => {
           source?.close();
           if (!stopped && reconnectTimer === null) {
+            apiBaseIndex = (apiBaseIndex + 1) % API_BASE_CANDIDATES.length;
             reconnectTimer = window.setTimeout(() => {
               reconnectTimer = null;
               connect();
@@ -443,6 +435,7 @@ function MediScanApp() {
         };
       } catch {
         if (!stopped && reconnectTimer === null) {
+          apiBaseIndex = (apiBaseIndex + 1) % API_BASE_CANDIDATES.length;
           reconnectTimer = window.setTimeout(() => {
             reconnectTimer = null;
             connect();
@@ -694,7 +687,7 @@ function MediScanApp() {
     try {
       const token = await getToken();
       if (!token) return;
-      await fetch(buildApiUrl('/notifications/read-all'), {
+      await fetchApiWithFallback('/notifications/read-all', {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -708,7 +701,7 @@ function MediScanApp() {
     try {
       const token = await getToken();
       if (!token) return;
-      await fetch(buildApiUrl(`/notifications/${id}/read`), {
+      await fetchApiWithFallback(`/notifications/${id}/read`, {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}` },
       });

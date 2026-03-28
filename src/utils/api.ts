@@ -3,30 +3,9 @@
  * Handles all backend API communications
  */
 
-const RAW_API_BASE = (import.meta.env.VITE_API_URL || '').trim().replace(/\/$/, '');
+import { fetchWithApiBaseFallback, getApiBaseCandidates } from './apiBase';
 
-function getApiBase(): string {
-  if (!RAW_API_BASE) return '';
-  if (typeof window === 'undefined') return RAW_API_BASE;
-
-  const runningOnLocalHost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
-  const pointsToLocalHost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(RAW_API_BASE);
-
-  // Safety: ignore localhost API URL in deployed environments.
-  if (!runningOnLocalHost && pointsToLocalHost) {
-    return '';
-  }
-  return RAW_API_BASE;
-}
-
-const API_BASE = getApiBase();
-
-function resolveApiUrl(endpoint: string): string {
-  if (!endpoint.startsWith('/')) {
-    throw new Error(`API endpoint must start with '/': ${endpoint}`);
-  }
-  return API_BASE ? `${API_BASE}${endpoint}` : endpoint;
-}
+const API_BASE_CANDIDATES = getApiBaseCandidates(import.meta.env.VITE_API_URL);
 
 /**
  * Generic fetch wrapper with error handling
@@ -35,17 +14,19 @@ async function fetchAPI<T = any>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const url = resolveApiUrl(endpoint);
-  
+  if (!endpoint.startsWith('/')) {
+    throw new Error(`API endpoint must start with '/': ${endpoint}`);
+  }
+
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await fetchWithApiBaseFallback(endpoint, {
       ...options,
       headers: {
         'Content-Type': 'application/json',
         ...options.headers,
       },
-    });
+    }, API_BASE_CANDIDATES);
   } catch (error) {
     console.error(`Network error while calling API [${endpoint}]:`, error);
     const message =

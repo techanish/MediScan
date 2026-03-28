@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Hammer, Send, X } from 'lucide-react';
 import { toast } from 'sonner';
+import { fetchWithApiBaseFallback, getApiBaseCandidates } from '../utils/apiBase';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_BASE_CANDIDATES = getApiBaseCandidates(import.meta.env.VITE_API_URL);
 
 interface BanAppealFormProps {
   userEmail?: string;
@@ -30,7 +31,7 @@ export function BanAppealForm({ userEmail, onClose }: BanAppealFormProps) {
 
     setIsSubmitting(true);
     try {
-      const response = await fetch(`${API_BASE}/tickets/ban-appeal`, {
+      const response = await fetchWithApiBaseFallback('/tickets/ban-appeal', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -39,7 +40,7 @@ export function BanAppealForm({ userEmail, onClose }: BanAppealFormProps) {
           email: email.trim(),
           description: description.trim(),
         }),
-      });
+      }, API_BASE_CANDIDATES);
 
       const data = await response.json();
 
